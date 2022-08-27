@@ -1,12 +1,5 @@
 name: validation-linux
-on:
-  pull_request:
-    paths:
-    - 'tests/out/spv/*.spvasm'
-    - 'tests/out/glsl/*.glsl'
-    - 'tests/out/dot/*.dot'
-    - 'tests/out/wgsl/*.wgsl'
-    - 'src/front/wgsl/*'
+on: push
 
 jobs:
   validate-linux:
