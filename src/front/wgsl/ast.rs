@@ -65,8 +65,8 @@ pub struct GlobalVariable<'a> {
     pub name: Ident<'a>,
     pub space: crate::AddressSpace,
     pub binding: Option<crate::ResourceBinding>,
-    pub ty: Option<Type<'a>>,
-    pub init: Option<Expression<'a>>,
+    pub ty: Type<'a>,
+    pub init: Option<Handle<Expression<'a>>>,
 }
 
 #[derive(Debug)]
@@ -74,6 +74,8 @@ pub struct StructMember<'a> {
     pub name: Ident<'a>,
     pub ty: Type<'a>,
     pub binding: Option<crate::Binding>,
+    pub align: Option<(u32, Span)>,
+    pub size: Option<(u32, Span)>,
 }
 
 #[derive(Debug)]
@@ -92,6 +94,12 @@ pub struct TypeAlias<'a> {
 pub struct Type<'a> {
     pub kind: TypeKind<'a>,
     pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum ArraySize<'a> {
+    Constant(Handle<Expression<'a>>),
+    Dynamic,
 }
 
 #[derive(Debug)]
@@ -120,7 +128,7 @@ pub enum TypeKind<'a> {
     },
     Array {
         base: Box<Type<'a>>,
-        size: crate::ArraySize,
+        size: ArraySize<'a>,
     },
     Image {
         dim: crate::ImageDimension,
@@ -132,31 +140,25 @@ pub enum TypeKind<'a> {
     },
     BindingArray {
         base: Box<Type<'a>>,
-        size: crate::ArraySize,
+        size: ArraySize<'a>,
     },
     User(Ident<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Block<'a> {
-    pub stmts: Vec<Stmt<'a>>,
+    pub stmts: Vec<Statement<'a>>,
+}
+
+#[derive(Debug)]
+pub struct Statement<'a> {
+    pub kind: StatementKind<'a>,
     pub span: Span,
 }
 
 #[derive(Debug)]
-pub struct Stmt<'a> {
-    pub kind: StmtKind<'a>,
-    pub span: Span,
-}
-
-#[derive(Debug)]
-pub enum AssignTarget<'a> {
-    Phony,
-    Variable(Ident<'a>),
-}
-
-#[derive(Debug)]
-pub enum StmtKind<'a> {
+pub enum StatementKind<'a> {
+    VarDecl(Box<VarDecl<'a>>),
     Block(Block<'a>),
     If {
         condition: Handle<Expression<'a>>,
@@ -183,28 +185,18 @@ pub enum StmtKind<'a> {
         arguments: Vec<Handle<Expression<'a>>>,
     },
     Assign {
-        target: AssignTarget<'a>,
+        target: Handle<Expression<'a>>,
+        op: Option<crate::BinaryOperator>,
         value: Handle<Expression<'a>>,
     },
+    Ignore(Handle<Expression<'a>>),
 }
 
 #[derive(Debug)]
 pub struct SwitchCase<'a> {
-    pub value: SwitchValue<'a>,
+    pub value: crate::SwitchValue,
     pub body: Block<'a>,
-    pub span: Span,
-}
-
-#[derive(Debug)]
-pub enum SwitchValue<'a> {
-    Expr(Handle<Expression<'a>>),
-    Default,
-}
-
-#[derive(Debug)]
-pub struct Expression<'a> {
-    pub kind: ExprKind<'a>,
-    pub span: Span,
+    pub fall_through: bool,
 }
 
 #[derive(Debug)]
@@ -233,8 +225,7 @@ pub enum ConstructorType<'a> {
     PartialArray,
     Array {
         base: Type<'a>,
-        size: crate::ArraySize,
-        stride: u32,
+        size: ArraySize<'a>,
     },
 }
 
@@ -245,7 +236,7 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub enum ExprKind<'a> {
+pub enum Expression<'a> {
     Literal(Literal),
     Ident(Ident<'a>),
     Construct {
@@ -266,7 +257,6 @@ pub enum ExprKind<'a> {
     Call {
         function: Ident<'a>,
         arguments: Vec<Handle<Expression<'a>>>,
-        result: Option<Handle<Expression<'a>>>,
     },
     Index {
         base: Handle<Expression<'a>>,
@@ -276,13 +266,16 @@ pub enum ExprKind<'a> {
         base: Handle<Expression<'a>>,
         field: Ident<'a>,
     },
-    Bitcast {},
+    Bitcast {
+        expr: Handle<Expression<'a>>,
+        to: Type<'a>,
+    },
 }
 
 #[derive(Debug)]
 pub struct LocalVariable<'a> {
     pub name: Ident<'a>,
-    pub ty: Type<'a>,
+    pub ty: Option<Type<'a>>,
     pub init: Option<Handle<Expression<'a>>>,
 }
 
