@@ -1,6 +1,6 @@
 use crate::front::wgsl::number::Number;
 use crate::front::wgsl::Span;
-use crate::{Arena, Handle};
+use crate::{Arena, FastHashSet, Handle};
 
 #[derive(Debug, Default)]
 pub struct TranslationUnit<'a> {
@@ -14,9 +14,16 @@ pub struct Ident<'a> {
     pub span: Span,
 }
 
+#[derive(PartialEq, Debug)]
+pub enum IdentExpr<'a> {
+    Unresolved(&'a str),
+    Local(Handle<Local>),
+}
+
 #[derive(Debug)]
 pub struct GlobalDecl<'a> {
     pub kind: GlobalDeclKind<'a>,
+    pub dependencies: FastHashSet<&'a str>,
     pub span: Span,
 }
 
@@ -24,8 +31,7 @@ pub struct GlobalDecl<'a> {
 pub enum GlobalDeclKind<'a> {
     Fn(Function<'a>),
     Var(GlobalVariable<'a>),
-    Let(Let<'a>),
-    Const(Let<'a>),
+    Const(Const<'a>),
     Struct(Struct<'a>),
     Type(TypeAlias<'a>),
 }
@@ -57,6 +63,7 @@ pub struct Function<'a> {
     pub arguments: Vec<FunctionArgument<'a>>,
     pub result: Option<FunctionResult<'a>>,
     pub expressions: Arena<Expression<'a>>,
+    pub locals: Arena<Local>,
     pub body: Block<'a>,
 }
 
@@ -88,6 +95,13 @@ pub struct Struct<'a> {
 pub struct TypeAlias<'a> {
     pub name: Ident<'a>,
     pub ty: Type<'a>,
+}
+
+#[derive(Debug)]
+pub struct Const<'a> {
+    pub name: Ident<'a>,
+    pub ty: Option<Type<'a>>,
+    pub init: Handle<Expression<'a>>,
 }
 
 #[derive(Debug)]
@@ -238,7 +252,7 @@ pub enum Literal {
 #[derive(Debug)]
 pub enum Expression<'a> {
     Literal(Literal),
-    Ident(Ident<'a>),
+    Ident(IdentExpr<'a>),
     Construct {
         ty: ConstructorType<'a>,
         components: Vec<Handle<Expression<'a>>>,
@@ -277,6 +291,15 @@ pub struct LocalVariable<'a> {
     pub name: Ident<'a>,
     pub ty: Option<Type<'a>>,
     pub init: Option<Handle<Expression<'a>>>,
+    pub handle: Handle<Local>,
+}
+
+#[derive(Debug)]
+pub struct Let<'a> {
+    pub name: Ident<'a>,
+    pub ty: Option<Type<'a>>,
+    pub init: Handle<Expression<'a>>,
+    pub handle: Handle<Local>,
 }
 
 #[derive(Debug)]
@@ -287,8 +310,4 @@ pub enum VarDecl<'a> {
 }
 
 #[derive(Debug)]
-pub struct Let<'a> {
-    pub name: Ident<'a>,
-    pub ty: Option<Type<'a>>,
-    pub init: Handle<Expression<'a>>,
-}
+pub struct Local;
