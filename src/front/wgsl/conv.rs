@@ -1,4 +1,4 @@
-use super::{Error, Span};
+use super::{errors::Error, Span};
 
 pub fn map_address_space(word: &str, span: Span) -> Result<crate::AddressSpace, Error<'_>> {
     match word {

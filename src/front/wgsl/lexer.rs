@@ -1,4 +1,9 @@
-use super::{conv, number::consume_number, Error, ExpectedToken, Span, Token, TokenSpan};
+use super::{
+    conv,
+    errors::{Error, ExpectedToken},
+    number::consume_number,
+    Span, Token, TokenSpan,
+};
 
 fn consume_any(input: &str, what: impl Fn(char) -> bool) -> (&str, &str) {
     let pos = input.find(|c| !what(c)).unwrap_or(input.len());
