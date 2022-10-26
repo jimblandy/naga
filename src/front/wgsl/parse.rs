@@ -25,7 +25,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     fn reborrow(&mut self) -> ExpressionContext<'a, '_, '_> {
         ExpressionContext {
             expressions: self.expressions,
-            global_expressions: self.global_expressions.as_mut().map(|r| &mut **r),
+            global_expressions: self.global_expressions.as_deref_mut(),
             local_table: self.local_table,
             locals: self.locals,
             unresolved: self.unresolved,
@@ -58,8 +58,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
 
     fn global_expressions(&mut self) -> &mut Arena<ast::Expression<'a>> {
         self.global_expressions
-            .as_mut()
-            .map(|r| &mut **r)
+            .as_deref_mut()
             .unwrap_or(self.expressions)
     }
 }
@@ -180,7 +179,7 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Parser { rules: Vec::new() }
     }
 
@@ -353,10 +352,8 @@ impl Parser {
                 if !lexer.next_argument()? {
                     break;
                 }
-            } else {
-                if lexer.skip(Token::Paren(')')) {
-                    break;
-                }
+            } else if lexer.skip(Token::Paren(')')) {
+                break;
             }
             let arg = self.parse_general_expression(lexer, ctx.reborrow())?;
             arguments.push(arg);
@@ -386,10 +383,8 @@ impl Parser {
             lexer.open_arguments()?;
             let mut components = Vec::new();
             loop {
-                if !components.is_empty() {
-                    if !lexer.next_argument()? {
-                        break;
-                    }
+                if !components.is_empty() && !lexer.next_argument()? {
+                    break;
                 }
                 let arg = self.parse_general_expression(lexer, ctx.reborrow())?;
                 components.push(arg);
@@ -1471,7 +1466,7 @@ impl Parser {
                         if let Some(old) = ctx.local_table.add(name, handle) {
                             return Err(Error::Redefinition {
                                 previous: ctx.locals.get_span(old).to_range().unwrap(),
-                                current: name_span.clone(),
+                                current: name_span,
                             });
                         }
 
@@ -1514,7 +1509,7 @@ impl Parser {
                         if let Some(old) = ctx.local_table.add(name, handle) {
                             return Err(Error::Redefinition {
                                 previous: ctx.locals.get_span(old).to_range().unwrap(),
-                                current: name_span.clone(),
+                                current: name_span,
                             });
                         }
 
@@ -2113,14 +2108,16 @@ impl Parser {
                     },
                 )?;
                 let type_span = lexer.span_from(start);
-                Some(ast::GlobalDecl {
-                    kind: ast::GlobalDeclKind::Struct(ast::Struct {
-                        name: ast::Ident { name, span },
-                        members,
-                    }),
-                    dependencies,
-                    span: type_span,
-                })
+                Some((
+                    ast::GlobalDecl {
+                        kind: ast::GlobalDeclKind::Struct(ast::Struct {
+                            name: ast::Ident { name, span },
+                            members,
+                        }),
+                        dependencies,
+                    },
+                    type_span,
+                ))
             }
             (Token::Word("type"), _) => {
                 let (name, span) = lexer.next_ident_with_span()?;
@@ -2138,14 +2135,16 @@ impl Parser {
                 lexer.expect(Token::Separator(';'))?;
                 let type_span = lexer.span_from(start);
 
-                Some(ast::GlobalDecl {
-                    kind: ast::GlobalDeclKind::Type(ast::TypeAlias {
-                        name: ast::Ident { name, span },
-                        ty,
-                    }),
-                    dependencies,
-                    span: type_span,
-                })
+                Some((
+                    ast::GlobalDecl {
+                        kind: ast::GlobalDeclKind::Type(ast::TypeAlias {
+                            name: ast::Ident { name, span },
+                            ty,
+                        }),
+                        dependencies,
+                    },
+                    type_span,
+                ))
             }
             (Token::Word("const"), _) => {
                 let (name, name_span) = lexer.next_ident_with_span()?;
@@ -2182,18 +2181,20 @@ impl Parser {
                 )?;
                 lexer.expect(Token::Separator(';'))?;
 
-                Some(ast::GlobalDecl {
-                    kind: ast::GlobalDeclKind::Const(ast::Const {
-                        name: ast::Ident {
-                            name,
-                            span: name_span,
-                        },
-                        ty,
-                        init,
-                    }),
-                    dependencies,
-                    span: lexer.span_from(start),
-                })
+                Some((
+                    ast::GlobalDecl {
+                        kind: ast::GlobalDeclKind::Const(ast::Const {
+                            name: ast::Ident {
+                                name,
+                                span: name_span,
+                            },
+                            ty,
+                            init,
+                        }),
+                        dependencies,
+                    },
+                    lexer.span_from(start),
+                ))
             }
             (Token::Word("var"), _) => {
                 let pvar = self.parse_variable_decl(
@@ -2210,44 +2211,46 @@ impl Parser {
                     return Err(Error::ReservedKeyword(pvar.name_span));
                 }
 
-                let span = lexer.span_from(start);
-
-                Some(ast::GlobalDecl {
-                    kind: ast::GlobalDeclKind::Var(ast::GlobalVariable {
-                        name: ast::Ident {
-                            name: pvar.name,
-                            span: pvar.name_span,
-                        },
-                        space: pvar.space.unwrap_or(crate::AddressSpace::Handle),
-                        binding: binding.take(),
-                        ty: pvar.ty,
-                        init: pvar.init,
-                    }),
-                    dependencies,
-                    span,
-                })
+                Some((
+                    ast::GlobalDecl {
+                        kind: ast::GlobalDeclKind::Var(ast::GlobalVariable {
+                            name: ast::Ident {
+                                name: pvar.name,
+                                span: pvar.name_span,
+                            },
+                            space: pvar.space.unwrap_or(crate::AddressSpace::Handle),
+                            binding: binding.take(),
+                            ty: pvar.ty,
+                            init: pvar.init,
+                        }),
+                        dependencies,
+                    },
+                    lexer.span_from(start),
+                ))
             }
             (Token::Word("fn"), _) => {
                 let function = self.parse_function_decl(lexer, out, &mut dependencies)?;
-                Some(ast::GlobalDecl {
-                    kind: ast::GlobalDeclKind::Fn(ast::Function {
-                        entry_point: stage.map(|stage| ast::EntryPoint {
-                            stage,
-                            early_depth_test,
-                            workgroup_size,
+                Some((
+                    ast::GlobalDecl {
+                        kind: ast::GlobalDeclKind::Fn(ast::Function {
+                            entry_point: stage.map(|stage| ast::EntryPoint {
+                                stage,
+                                early_depth_test,
+                                workgroup_size,
+                            }),
+                            ..function
                         }),
-                        ..function
-                    }),
-                    dependencies,
-                    span: lexer.span_from(start),
-                })
+                        dependencies,
+                    },
+                    lexer.span_from(start),
+                ))
             }
             (Token::End, _) => return Ok(false),
             other => return Err(Error::Unexpected(other.1, ExpectedToken::GlobalItem)),
         };
 
-        if let Some(decl) = decl {
-            out.decls.push(decl);
+        if let Some((decl, span)) = decl {
+            out.decls.append(decl, span.into());
         }
 
         match binding {

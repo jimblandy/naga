@@ -7,6 +7,7 @@ Frontend for [WGSL][wgsl] (WebGPU Shading Language).
 mod ast;
 mod conv;
 mod errors;
+mod index;
 mod lexer;
 mod number;
 mod parse;
@@ -21,6 +22,7 @@ use self::{
     number::Number,
 };
 
+use crate::front::wgsl::index::Index;
 pub use parse::Parser;
 
 type Span = ops::Range<usize>;
@@ -326,5 +328,7 @@ impl crate::ScalarKind {
 
 pub fn parse_str(source: &str) -> Result<crate::Module, ParseError> {
     let tu = Parser::new().parse(source)?;
+    let index = Index::generate(&tu);
+
     Ok(crate::Module::default())
 }

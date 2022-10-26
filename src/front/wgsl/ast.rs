@@ -4,7 +4,7 @@ use crate::{Arena, FastHashSet, Handle};
 
 #[derive(Debug, Default)]
 pub struct TranslationUnit<'a> {
-    pub decls: Vec<GlobalDecl<'a>>,
+    pub decls: Arena<GlobalDecl<'a>>,
     pub global_expressions: Arena<Expression<'a>>,
 }
 
@@ -24,7 +24,6 @@ pub enum IdentExpr<'a> {
 pub struct GlobalDecl<'a> {
     pub kind: GlobalDeclKind<'a>,
     pub dependencies: FastHashSet<&'a str>,
-    pub span: Span,
 }
 
 #[derive(Debug)]
