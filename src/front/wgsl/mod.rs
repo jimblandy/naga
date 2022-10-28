@@ -328,7 +328,7 @@ impl crate::ScalarKind {
 
 pub fn parse_str(source: &str) -> Result<crate::Module, ParseError> {
     let tu = Parser::new().parse(source)?;
-    let index = Index::generate(&tu);
+    let index = Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
 
     Ok(crate::Module::default())
 }

@@ -122,6 +122,14 @@ pub enum Error<'a> {
         previous: Span,
         current: Span,
     },
+    RecursiveDeclaration {
+        ident: Span,
+        usage: Span,
+    },
+    CyclicDeclaration {
+        ident: Span,
+        path: Vec<(Span, Span)>,
+    },
     Other,
 }
 
@@ -517,6 +525,44 @@ impl<'a> Error<'a> {
                         format!("previous definition of `{}`", &source[previous.clone()]).into(),
                     ),
                 ],
+                notes: vec![],
+            },
+            Error::RecursiveDeclaration {
+                ref ident,
+                ref usage,
+            } => ParseError {
+                message: format!("declaration of `{}` is recursive", &source[ident.clone()]),
+                labels: vec![
+                    (ident.clone(), "".into()),
+                    (usage.clone(), "uses itself here".into()),
+                ],
+                notes: vec![],
+            },
+            Error::CyclicDeclaration {
+                ref ident,
+                ref path,
+            } => ParseError {
+                message: format!("declaration of `{}` is cyclic", &source[ident.clone()]),
+                labels: path
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, (ident, usage))| {
+                        [
+                            (ident.clone(), "".into()),
+                            (
+                                usage.clone(),
+                                if i == path.len() - 1 {
+                                    format!("ending the cycle").into()
+                                } else {
+                                    format!("uses `{}`", &source[ident.clone()]).into()
+                                },
+                            ),
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                    })
+                    .collect(),
                 notes: vec![],
             },
             Error::Other => ParseError {

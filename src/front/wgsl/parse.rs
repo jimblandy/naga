@@ -18,7 +18,7 @@ struct ExpressionContext<'input, 'temp, 'out> {
     global_expressions: Option<&'out mut Arena<ast::Expression<'input>>>,
     local_table: &'temp mut SymbolTable<&'input str, Handle<ast::Local>>,
     locals: &'out mut Arena<ast::Local>,
-    unresolved: &'out mut FastHashSet<&'input str>,
+    unresolved: &'out mut FastHashSet<ast::Dependency<'input>>,
 }
 
 impl<'a> ExpressionContext<'a, '_, '_> {
@@ -429,12 +429,16 @@ impl Parser {
     fn parse_ident_expr<'a>(
         &mut self,
         name: &'a str,
+        name_span: Span,
         ctx: ExpressionContext<'a, '_, '_>,
     ) -> ast::IdentExpr<'a> {
         match ctx.local_table.lookup(name) {
             Some(&local) => ast::IdentExpr::Local(local),
             None => {
-                ctx.unresolved.insert(name);
+                ctx.unresolved.insert(ast::Dependency {
+                    ident: name,
+                    usage: name_span,
+                });
                 ast::IdentExpr::Unresolved(name)
             }
         }
@@ -476,7 +480,7 @@ impl Parser {
                         return self.parse_function_call(lexer, word, span, ctx);
                     }
                     _ => {
-                        let ident = self.parse_ident_expr(word, ctx.reborrow());
+                        let ident = self.parse_ident_expr(word, span, ctx.reborrow());
                         ast::Expression::Ident(ident)
                     }
                 }
@@ -1336,6 +1340,10 @@ impl Parser {
     ) -> Result<(), Error<'a>> {
         self.push_rule_span(Rule::SingularExpr, lexer);
 
+        context.unresolved.insert(ast::Dependency {
+            ident,
+            usage: ident_span.clone(),
+        });
         let (function, arguments) = self.parse_inbuilt_or_user_function(
             lexer,
             ident,
@@ -1372,8 +1380,11 @@ impl Parser {
                         self.parse_function_statement(lexer, name, span, context.reborrow(), block)
                     }
                     _ => {
-                        let expr =
-                            ast::Expression::Ident(self.parse_ident_expr(name, context.reborrow()));
+                        let expr = ast::Expression::Ident(self.parse_ident_expr(
+                            name,
+                            span.clone(),
+                            context.reborrow(),
+                        ));
                         let target = context.expressions.append(expr, NagaSpan::from(span));
                         self.parse_assignment_op_and_rhs(lexer, context, block, target, span_start)
                     }
@@ -1912,7 +1923,7 @@ impl Parser {
         &mut self,
         lexer: &mut Lexer<'a>,
         out: &mut ast::TranslationUnit<'a>,
-        dependencies: &mut FastHashSet<&'a str>,
+        dependencies: &mut FastHashSet<ast::Dependency<'a>>,
     ) -> Result<ast::Function<'a>, Error<'a>> {
         self.push_rule_span(Rule::FunctionDecl, lexer);
         // read function name

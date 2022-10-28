@@ -1,6 +1,7 @@
 use crate::front::wgsl::number::Number;
 use crate::front::wgsl::Span;
 use crate::{Arena, FastHashSet, Handle};
+use std::hash::Hash;
 
 #[derive(Debug, Default)]
 pub struct TranslationUnit<'a> {
@@ -8,7 +9,7 @@ pub struct TranslationUnit<'a> {
     pub global_expressions: Arena<Expression<'a>>,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Ident<'a> {
     pub name: &'a str,
     pub span: Span,
@@ -21,9 +22,29 @@ pub enum IdentExpr<'a> {
 }
 
 #[derive(Debug)]
+pub struct Dependency<'a> {
+    pub ident: &'a str,
+    pub usage: Span,
+}
+
+impl Hash for Dependency<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.ident.hash(state);
+    }
+}
+
+impl PartialEq for Dependency<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.ident == other.ident
+    }
+}
+
+impl Eq for Dependency<'_> {}
+
+#[derive(Debug)]
 pub struct GlobalDecl<'a> {
     pub kind: GlobalDeclKind<'a>,
-    pub dependencies: FastHashSet<&'a str>,
+    pub dependencies: FastHashSet<Dependency<'a>>,
 }
 
 #[derive(Debug)]

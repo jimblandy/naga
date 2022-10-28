@@ -1677,3 +1677,51 @@ fn assign_to_let() {
 "###,
     );
 }
+
+#[test]
+fn recursive_function() {
+    check(
+        "
+        fn f() {
+            f();
+        }
+        ",
+        r###"error: declaration of `f` is recursive
+  ┌─ wgsl:2:12
+  │
+2 │         fn f() {
+  │            ^
+3 │             f();
+  │             ^ uses itself here
+
+"###,
+    );
+}
+
+#[test]
+fn cyclic_function() {
+    check(
+        "
+        fn f() {
+            g();
+        }
+        fn g() {
+            f();
+        }
+        ",
+        r###"error: declaration of `f` is cyclic
+  ┌─ wgsl:2:12
+  │
+2 │         fn f() {
+  │            ^
+3 │             g();
+  │             ^ uses `g`
+4 │         }
+5 │         fn g() {
+  │            ^
+6 │             f();
+  │             ^ ending the cycle
+
+"###,
+    );
+}
