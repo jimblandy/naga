@@ -338,13 +338,11 @@ impl Parser {
     }
 
     /// Expects `name` to be consumed (not in lexer).
-    fn parse_inbuilt_or_user_function<'a>(
+    fn parse_arguments<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        name: &'a str,
-        name_span: Span,
         mut ctx: ExpressionContext<'a, '_, '_>,
-    ) -> Result<(ast::Ident<'a>, Vec<Handle<ast::Expression<'a>>>), Error<'a>> {
+    ) -> Result<Vec<Handle<ast::Expression<'a>>>, Error<'a>> {
         lexer.open_arguments()?;
         let mut arguments = Vec::new();
         loop {
@@ -359,13 +357,7 @@ impl Parser {
             arguments.push(arg);
         }
 
-        Ok((
-            ast::Ident {
-                name,
-                span: name_span,
-            },
-            arguments,
-        ))
+        Ok(arguments)
     }
 
     /// Expects [`Rule::PrimaryExpr`] or [`Rule::SingularExpr`] on top; does not pop it.
@@ -379,44 +371,28 @@ impl Parser {
     ) -> Result<Handle<ast::Expression<'a>>, Error<'a>> {
         assert!(self.rules.last().is_some());
 
-        let expr = if let Some(ty) = self.parse_constructor_type(lexer, name, ctx.reborrow())? {
-            lexer.open_arguments()?;
-            let mut components = Vec::new();
-            loop {
-                if !components.is_empty() && !lexer.next_argument()? {
-                    break;
-                }
-                let arg = self.parse_general_expression(lexer, ctx.reborrow())?;
-                components.push(arg);
+        let expr = match name {
+            // bitcast looks like a function call, but it's an operator and must be handled differently.
+            "bitcast" => {
+                lexer.expect_generic_paren('<')?;
+                let to = self.parse_type_decl(lexer, ctx.reborrow())?;
+                lexer.expect_generic_paren('>')?;
+
+                lexer.open_arguments()?;
+                let expr = self.parse_general_expression(lexer, ctx.reborrow())?;
+                lexer.close_arguments()?;
+
+                ast::Expression::Bitcast { expr, to }
             }
-            lexer.close_arguments()?;
-
-            ast::Expression::Construct { ty, components }
-        } else {
-            match name {
-                "bitcast" => {
-                    lexer.expect_generic_paren('<')?;
-                    let to = self.parse_type_decl(lexer, ctx.reborrow())?;
-                    lexer.expect_generic_paren('>')?;
-
-                    lexer.open_arguments()?;
-                    let expr = self.parse_general_expression(lexer, ctx.reborrow())?;
-                    lexer.close_arguments()?;
-
-                    ast::Expression::Bitcast { expr, to }
-                }
-                // everything else can be handled later, since they can be hidden by user-defined functions.
-                _ => {
-                    let (function, arguments) = self.parse_inbuilt_or_user_function(
-                        lexer,
+            // everything else must be handled later, since they can be hidden by user-defined functions.
+            _ => {
+                let arguments = self.parse_arguments(lexer, ctx.reborrow())?;
+                ast::Expression::Call {
+                    function: ast::Ident {
                         name,
-                        name_span,
-                        ctx.reborrow(),
-                    )?;
-                    ast::Expression::Call {
-                        function,
-                        arguments,
-                    }
+                        span: name_span,
+                    },
+                    arguments,
                 }
             }
         };
@@ -474,12 +450,15 @@ impl Parser {
             }
             (Token::Word(word), span) => {
                 let _ = lexer.next();
-                match lexer.peek().0 {
-                    Token::Paren('(') => {
+
+                if let Some(ty) = self.parse_constructor_type(lexer, word, ctx.reborrow())? {
+                    let components = self.parse_arguments(lexer, ctx.reborrow())?;
+                    ast::Expression::Construct { ty, components }
+                } else {
+                    if let Token::Paren('(') = lexer.peek().0 {
                         self.pop_rule_span(lexer);
                         return self.parse_function_call(lexer, word, span, ctx);
-                    }
-                    _ => {
+                    } else {
                         let ident = self.parse_ident_expr(word, span, ctx.reborrow());
                         ast::Expression::Ident(ident)
                     }
@@ -1344,17 +1323,15 @@ impl Parser {
             ident,
             usage: ident_span.clone(),
         });
-        let (function, arguments) = self.parse_inbuilt_or_user_function(
-            lexer,
-            ident,
-            ident_span.clone(),
-            context.reborrow(),
-        )?;
+        let arguments = self.parse_arguments(lexer, context.reborrow())?;
         let span_end = lexer.end_byte_offset();
 
         block.stmts.push(ast::Statement {
             kind: ast::StatementKind::Call {
-                function,
+                function: ast::Ident {
+                    name: ident,
+                    span: ident_span.clone(),
+                },
                 arguments,
             },
             span: ident_span.start..span_end,

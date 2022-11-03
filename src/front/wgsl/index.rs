@@ -14,7 +14,6 @@ impl<'a> Index<'a> {
         // Populate dependencies
         for (handle, decl) in tu.decls.iter() {
             let name = decl_ident(decl).name;
-
             globals.insert(name, handle);
         }
 
@@ -33,6 +32,10 @@ impl<'a> Index<'a> {
             globals,
             dependency_order,
         })
+    }
+
+    pub fn visit_ordered(&self) -> impl Iterator<Item = Handle<ast::GlobalDecl<'a>>> + '_ {
+        self.dependency_order.iter().copied()
     }
 }
 
