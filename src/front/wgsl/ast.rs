@@ -130,7 +130,7 @@ pub struct Type<'a> {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum ArraySize<'a> {
     Constant(Handle<Expression<'a>>),
     Dynamic,

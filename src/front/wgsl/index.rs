@@ -3,7 +3,6 @@ use crate::front::wgsl::{ast, Span};
 use crate::{FastHashMap, Handle};
 
 pub struct Index<'a> {
-    globals: FastHashMap<&'a str, Handle<ast::GlobalDecl<'a>>>,
     dependency_order: Vec<Handle<ast::GlobalDecl<'a>>>,
 }
 
@@ -14,7 +13,12 @@ impl<'a> Index<'a> {
         // Populate dependencies
         for (handle, decl) in tu.decls.iter() {
             let name = decl_ident(decl).name;
-            globals.insert(name, handle);
+            if let Some(old) = globals.insert(name, handle) {
+                return Err(Error::Redefinition {
+                    previous: tu.decls.get_span(old).to_range().unwrap(),
+                    current: tu.decls.get_span(handle).to_range().unwrap(),
+                });
+            }
         }
 
         let len = tu.decls.len();
@@ -28,10 +32,7 @@ impl<'a> Index<'a> {
         };
         let dependency_order = solver.solve()?;
 
-        Ok(Self {
-            globals,
-            dependency_order,
-        })
+        Ok(Self { dependency_order })
     }
 
     pub fn visit_ordered(&self) -> impl Iterator<Item = Handle<ast::GlobalDecl<'a>>> + '_ {

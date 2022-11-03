@@ -9,6 +9,7 @@ mod conv;
 mod errors;
 mod index;
 mod lexer;
+mod lower;
 mod number;
 mod parse;
 #[cfg(test)]
@@ -23,6 +24,7 @@ use self::{
 };
 
 use crate::front::wgsl::index::Index;
+use crate::front::wgsl::lower::Lowerer;
 pub use parse::Parser;
 
 type Span = ops::Range<usize>;
@@ -329,6 +331,7 @@ impl crate::ScalarKind {
 pub fn parse_str(source: &str) -> Result<crate::Module, ParseError> {
     let tu = Parser::new().parse(source)?;
     let index = Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
-
-    Ok(crate::Module::default())
+    Lowerer::new(&index)
+        .lower(&tu)
+        .map_err(|x| x.as_parse_error(source))
 }

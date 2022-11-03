@@ -38,6 +38,8 @@ pub enum ExpectedToken<'a> {
     WorkgroupSizeSeparator,
     /// Expected: 'struct', 'let', 'var', 'type', ';', 'fn', eof
     GlobalItem,
+    /// Expected a type.
+    Type,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
@@ -130,6 +132,7 @@ pub enum Error<'a> {
         ident: Span,
         path: Vec<(Span, Span)>,
     },
+    ConstExprUnsupported(Span),
     Other,
 }
 
@@ -176,6 +179,7 @@ impl<'a> Error<'a> {
                     ExpectedToken::SwitchItem => "switch item ('case' or 'default') or a closing curly bracket to signify the end of the switch statement ('}')".to_string(),
                     ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
                     ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
+                    ExpectedToken::Type => "type".to_string(),
                 };
                 ParseError {
                     message: format!(
@@ -564,6 +568,11 @@ impl<'a> Error<'a> {
                     })
                     .collect(),
                 notes: vec![],
+            },
+            Error::ConstExprUnsupported(ref span) => ParseError {
+                message: "this constant expression is not supported".to_string(),
+                labels: vec![(span.clone(), "expression is not supported".into())],
+                notes: vec!["this should be fixed in a future version of Naga".into()],
             },
             Error::Other => ParseError {
                 message: "other error".to_string(),
