@@ -1,10 +1,10 @@
-use crate::front::wgsl::ast;
 use crate::front::wgsl::ast::{
     ArraySize, ConstructorType, GlobalDeclKind, TranslationUnit, TypeKind, VarDecl,
 };
 use crate::front::wgsl::errors::{Error, ExpectedToken, InvalidAssignmentType};
 use crate::front::wgsl::index::Index;
 use crate::front::wgsl::number::Number;
+use crate::front::wgsl::{ast, conv};
 use crate::front::{Emitter, Typifier};
 use crate::proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, TypeResolution};
 use crate::{Arena, FastHashMap, Handle, NamedExpressions, Span};
@@ -171,6 +171,21 @@ impl<'a> ExpressionContext<'a, '_, '_> {
                 }
             },
         })
+    }
+
+    fn prepare_args<'b>(
+        &mut self,
+        args: &'b [Handle<ast::Expression<'a>>],
+        min_args: u32,
+        span: Span,
+    ) -> ArgumentContext<'b, 'a> {
+        ArgumentContext {
+            args: args.iter(),
+            min_args,
+            args_used: 0,
+            total_args: args.len() as u32,
+            span: span.to_range().unwrap(),
+        }
     }
 
     /// Insert splats, if needed by the non-'*' operations.
@@ -341,6 +356,42 @@ impl<'a> ExpressionContext<'a, '_, '_> {
             .as_ref()
             .map(|s| &**s)
             .unwrap_or("unknown")
+    }
+}
+
+struct ArgumentContext<'ctx, 'source> {
+    args: std::slice::Iter<'ctx, Handle<ast::Expression<'source>>>,
+    min_args: u32,
+    args_used: u32,
+    total_args: u32,
+    span: super::Span,
+}
+
+impl<'source> ArgumentContext<'_, 'source> {
+    pub fn finish(self) -> Result<(), Error<'source>> {
+        if self.args.len() == 0 {
+            Ok(())
+        } else {
+            Err(Error::WrongArgumentCount {
+                found: self.total_args,
+                expected: self.min_args..self.args_used + 1,
+                span: self.span,
+            })
+        }
+    }
+
+    pub fn next(&mut self) -> Result<Handle<ast::Expression<'source>>, Error<'source>> {
+        match self.args.next().copied() {
+            Some(arg) => {
+                self.args_used += 1;
+                Ok(arg)
+            }
+            None => Err(Error::WrongArgumentCount {
+                found: self.total_args,
+                expected: self.min_args..self.args_used + 1,
+                span: self.span.clone(),
+            }),
+        }
     }
 }
 
@@ -1093,7 +1144,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref function,
                 ref arguments,
             } => {
-                let handle = self.call(span, function, arguments, ctx.reborrow())?;
+                let handle = self
+                    .call(span, function, arguments, ctx.reborrow())?
+                    .ok_or(Error::FunctionReturnsVoid(function.span.clone()))?;
                 return Ok(TypedExpression {
                     handle,
                     is_reference: false,
@@ -1223,7 +1276,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         return Err(Error::BadTypeCast {
                             from_type: format!("{}", ctx.fmt_ty(ty)),
                             span: to.span.clone(),
-                            to_type: format!("{:?}", ctx.fmt_ty(to_resolved)),
+                            to_type: format!("{}", ctx.fmt_ty(to_resolved)),
                         });
                     }
                 };
@@ -1252,7 +1305,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         function: &ast::Ident<'source>,
         arguments: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
-    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+    ) -> Result<Option<Handle<crate::Expression>>, Error<'source>> {
         match ctx.globals.get(function.name) {
             Some(&GlobalDecl::Type(ty)) => {
                 let handle = self.construct(
@@ -1262,7 +1315,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     arguments,
                     ctx.reborrow(),
                 )?;
-                Ok(handle)
+                Ok(Some(handle))
             }
             Some(&GlobalDecl::Const(_) | &GlobalDecl::Var(_)) => Err(Error::Unexpected(
                 function.span.clone(),
@@ -1274,24 +1327,723 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     .iter()
                     .map(|&arg| self.lower_expression(arg, ctx.reborrow()))
                     .collect::<Result<Vec<_>, _>>()?;
-                let handle = ctx.interrupt_emitter(crate::Expression::CallResult(function), span);
+                let result = ctx.module.functions[function]
+                    .result
+                    .is_some()
+                    .then(|| ctx.interrupt_emitter(crate::Expression::CallResult(function), span));
 
                 ctx.block.push(
                     crate::Statement::Call {
                         function,
                         arguments,
-                        result: Some(handle),
+                        result,
                     },
                     span,
                 );
 
-                Ok(handle)
+                Ok(result)
             }
-            None => Err(Error::UnknownIdent(
-                function.span.clone(),
-                function.name.clone(),
-            )),
+            None => {
+                let span = function.span.clone().into();
+                let expr = if let Some(fun) = conv::map_relational_fun(function.name) {
+                    let mut args = ctx.prepare_args(arguments, 1, span);
+                    let argument = self.lower_expression(args.next()?, ctx.reborrow())?;
+                    args.finish()?;
+
+                    crate::Expression::Relational { fun, argument }
+                } else if let Some(axis) = conv::map_derivative_axis(function.name) {
+                    let mut args = ctx.prepare_args(arguments, 1, span);
+                    let expr = self.lower_expression(args.next()?, ctx.reborrow())?;
+                    args.finish()?;
+
+                    crate::Expression::Derivative { axis, expr }
+                } else if let Some(fun) = conv::map_standard_fun(function.name) {
+                    let expected = fun.argument_count() as _;
+                    let mut args = ctx.prepare_args(arguments, expected, span);
+
+                    let arg = self.lower_expression(args.next()?, ctx.reborrow())?;
+                    let arg1 = args
+                        .next()
+                        .map(|x| self.lower_expression(x, ctx.reborrow()))
+                        .ok()
+                        .transpose()?;
+                    let arg2 = args
+                        .next()
+                        .map(|x| self.lower_expression(x, ctx.reborrow()))
+                        .ok()
+                        .transpose()?;
+                    let arg3 = args
+                        .next()
+                        .map(|x| self.lower_expression(x, ctx.reborrow()))
+                        .ok()
+                        .transpose()?;
+
+                    args.finish()?;
+
+                    crate::Expression::Math {
+                        fun,
+                        arg,
+                        arg1,
+                        arg2,
+                        arg3,
+                    }
+                } else {
+                    match function.name {
+                        "select" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let reject = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            let accept = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            let condition = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            args.finish()?;
+
+                            crate::Expression::Select {
+                                reject,
+                                accept,
+                                condition,
+                            }
+                        }
+                        "arrayLength" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let expr = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            crate::Expression::ArrayLength(expr)
+                        }
+                        "atomicLoad" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            crate::Expression::Load { pointer }
+                        }
+                        "atomicStore" => {
+                            let mut args = ctx.prepare_args(arguments, 2, span);
+                            let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
+                            let value = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            ctx.block
+                                .push(crate::Statement::Store { pointer, value }, span);
+                            return Ok(None);
+                        }
+                        "atomicAdd" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::Add,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicSub" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::Subtract,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicAnd" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::And,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicOr" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::InclusiveOr,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicXor" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::ExclusiveOr,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicMin" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::Min,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicMax" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::Max,
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicExchange" => {
+                            return Ok(Some(self.atomic_helper(
+                                span,
+                                crate::AtomicFunction::Exchange { compare: None },
+                                arguments,
+                                ctx.reborrow(),
+                            )?))
+                        }
+                        "atomicCompareExchangeWeak" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
+
+                            let compare = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let value = args.next()?;
+                            let value_span = ctx.read_expressions.get_span(value);
+                            let value = self.lower_expression(value, ctx.reborrow())?;
+                            let ty = ctx.resolve_type(pointer)?;
+
+                            args.finish()?;
+
+                            let expression = match ctx.module.types[ty].inner {
+                                crate::TypeInner::Scalar { kind, width } => {
+                                    crate::Expression::AtomicResult {
+                                        kind,
+                                        width,
+                                        comparison: false,
+                                    }
+                                }
+                                _ => {
+                                    return Err(Error::InvalidAtomicOperandType(
+                                        value_span.to_range().unwrap(),
+                                    ))
+                                }
+                            };
+
+                            let result = ctx.interrupt_emitter(expression, span.clone().into());
+                            ctx.block.push(
+                                crate::Statement::Atomic {
+                                    pointer,
+                                    fun: crate::AtomicFunction::Exchange {
+                                        compare: Some(compare),
+                                    },
+                                    value,
+                                    result,
+                                },
+                                span.into(),
+                            );
+                            return Ok(Some(result));
+                        }
+                        "storageBarrier" => {
+                            ctx.prepare_args(arguments, 0, span).finish()?;
+
+                            ctx.block
+                                .push(crate::Statement::Barrier(crate::Barrier::STORAGE), span);
+                            return Ok(None);
+                        }
+                        "workgroupBarrier" => {
+                            ctx.prepare_args(arguments, 0, span).finish()?;
+
+                            ctx.block
+                                .push(crate::Statement::Barrier(crate::Barrier::WORK_GROUP), span);
+                            return Ok(None);
+                        }
+                        "textureStore" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let value = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            args.finish()?;
+
+                            let stmt = crate::Statement::ImageStore {
+                                image,
+                                coordinate,
+                                array_index,
+                                value,
+                            };
+                            ctx.block.push(stmt, span);
+                            return Ok(None);
+                        }
+                        "textureSample" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Auto,
+                                depth_ref: None,
+                            }
+                        }
+                        "textureSampleLevel" => {
+                            let mut args = ctx.prepare_args(arguments, 5, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let level = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Exact(level),
+                                depth_ref: None,
+                            }
+                        }
+                        "textureSampleBias" => {
+                            let mut args = ctx.prepare_args(arguments, 5, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let bias = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Bias(bias),
+                                depth_ref: None,
+                            }
+                        }
+                        "textureSampleGrad" => {
+                            let mut args = ctx.prepare_args(arguments, 6, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let x = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            let y = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Gradient { x, y },
+                                depth_ref: None,
+                            }
+                        }
+                        "textureSampleCompare" => {
+                            let mut args = ctx.prepare_args(arguments, 5, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Auto,
+                                depth_ref: Some(reference),
+                            }
+                        }
+                        "textureSampleCompareLevel" => {
+                            let mut args = ctx.prepare_args(arguments, 5, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: None,
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Zero,
+                                depth_ref: Some(reference),
+                            }
+                        }
+                        "textureGather" => unreachable!(),
+                        "textureGatherCompare" => unreachable!(),
+                        "textureLoad" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let ty = ctx.resolve_type(image)?;
+                            let (class, arrayed) = match ctx.module.types[ty].inner {
+                                crate::TypeInner::Image { class, arrayed, .. } => (class, arrayed),
+                                _ => return Err(Error::BadTexture(image_span)),
+                            };
+                            let array_index = arrayed
+                                .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
+                                .transpose()?;
+
+                            let level = class
+                                .is_mipmapped()
+                                .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
+                                .transpose()?;
+
+                            let sample = class
+                                .is_multisampled()
+                                .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageLoad {
+                                image,
+                                coordinate,
+                                array_index,
+                                level,
+                                sample,
+                            }
+                        }
+                        "textureDimensions" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let image = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            let level = args
+                                .next()
+                                .map(|arg| self.lower_expression(arg, ctx.reborrow()))
+                                .ok()
+                                .transpose()?;
+                            args.finish()?;
+
+                            crate::Expression::ImageQuery {
+                                image,
+                                query: crate::ImageQuery::Size { level },
+                            }
+                        }
+                        "textureNumLevels" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let image = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            crate::Expression::ImageQuery {
+                                image,
+                                query: crate::ImageQuery::NumLevels,
+                            }
+                        }
+                        "textureNumLayers" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let image = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            crate::Expression::ImageQuery {
+                                image,
+                                query: crate::ImageQuery::NumLayers,
+                            }
+                        }
+                        "textureNumSamples" => {
+                            let mut args = ctx.prepare_args(arguments, 1, span);
+                            let image = self.lower_expression(args.next()?, ctx.reborrow())?;
+                            args.finish()?;
+
+                            crate::Expression::ImageQuery {
+                                image,
+                                query: crate::ImageQuery::NumSamples,
+                            }
+                        }
+                        _ => {
+                            return Err(Error::UnknownIdent(
+                                function.span.clone(),
+                                function.name.clone(),
+                            ))
+                        }
+                    }
+                };
+
+                let expr = ctx.expressions.append(expr, span);
+                Ok(Some(expr))
+            }
         }
+    }
+
+    fn atomic_pointer(
+        &mut self,
+        expr: Handle<ast::Expression<'source>>,
+        mut ctx: ExpressionContext<'source, '_, '_>,
+    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+        let span = ctx.read_expressions.get_span(expr).to_range().unwrap();
+        let pointer = self.lower_expression(expr, ctx.reborrow())?;
+
+        let ty = ctx.resolve_type(pointer)?;
+        match ctx.module.types[ty].inner {
+            crate::TypeInner::Pointer { base, .. } => match ctx.module.types[base].inner {
+                crate::TypeInner::Atomic { .. } => Ok(pointer),
+                ref other => {
+                    log::error!("Pointer type to {:?} passed to atomic op", other);
+                    Err(Error::InvalidAtomicPointer(span))
+                }
+            },
+            ref other => {
+                log::error!("Type {:?} passed to atomic op", other);
+                Err(Error::InvalidAtomicPointer(span))
+            }
+        }
+    }
+
+    fn atomic_helper(
+        &mut self,
+        span: Span,
+        fun: crate::AtomicFunction,
+        args: &[Handle<ast::Expression<'source>>],
+        mut ctx: ExpressionContext<'source, '_, '_>,
+    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+        let mut args = ctx.prepare_args(args, 2, span);
+
+        let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
+        let value = args.next()?;
+        let value_span = ctx.read_expressions.get_span(value);
+        let value = self.lower_expression(value, ctx.reborrow())?;
+        let ty = ctx.resolve_type(pointer)?;
+
+        args.finish()?;
+
+        let expression = match ctx.module.types[ty].inner {
+            crate::TypeInner::Scalar { kind, width } => crate::Expression::AtomicResult {
+                kind,
+                width,
+                comparison: false,
+            },
+            _ => {
+                return Err(Error::InvalidAtomicOperandType(
+                    value_span.to_range().unwrap(),
+                ))
+            }
+        };
+
+        let result = ctx.interrupt_emitter(expression, span.clone().into());
+        ctx.block.push(
+            crate::Statement::Atomic {
+                pointer,
+                fun,
+                value,
+                result,
+            },
+            span.into(),
+        );
+        Ok(result)
     }
 
     fn construct(

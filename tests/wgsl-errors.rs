@@ -1766,3 +1766,27 @@ fn switch_signed_unsigned_mismatch() {
 "###,
     );
 }
+
+#[test]
+fn function_returns_void() {
+    check(
+        "
+        fn x() {
+	        let a = vec2<f32>(1, 2u);
+        }
+
+        fn b() {
+	        let a = x();
+        }
+    ",
+        r###"error: function does not return any value
+  ┌─ wgsl:7:18
+  │
+7 │             let a = x();
+  │                     ^
+  │
+  = note: perhaps you meant to call the function in a separate statement?
+
+"###,
+    )
+}

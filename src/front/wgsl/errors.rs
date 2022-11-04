@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ops::Range;
 use thiserror::Error;
 
 use super::{NumberType, Span, Token};
@@ -142,6 +143,12 @@ pub enum Error<'a> {
         span: Span,
     },
     CalledEntryPoint(Span),
+    WrongArgumentCount {
+        span: Span,
+        expected: Range<u32>,
+        found: u32,
+    },
+    FunctionReturnsVoid(Span),
     Other,
 }
 
@@ -612,6 +619,30 @@ impl<'a> Error<'a> {
                 message: "entry point cannot be called".to_string(),
                 labels: vec![(span.clone(), "entry point cannot be called".into())],
                 notes: vec![],
+            },
+            Error::WrongArgumentCount {
+                ref span,
+                ref expected,
+                found,
+            } => ParseError {
+                message: format!(
+                    "wrong number of arguments: expected {}, found {}",
+                    if expected.len() < 2 {
+                        format!("{}", expected.start)
+                    } else {
+                        format!("{}..{}", expected.start, expected.end)
+                    },
+                    found
+                ),
+                labels: vec![(span.clone(), "wrong number of arguments".into())],
+                notes: vec![],
+            },
+            Error::FunctionReturnsVoid(ref span) => ParseError {
+                message: "function does not return any value".to_string(),
+                labels: vec![(span.clone(), "".into())],
+                notes: vec![
+                    "perhaps you meant to call the function in a separate statement?".into(),
+                ],
             },
             Error::Other => ParseError {
                 message: "other error".to_string(),
