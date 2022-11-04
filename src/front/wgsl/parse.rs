@@ -201,11 +201,13 @@ impl Parser {
         lexer.span_from(initial)
     }
 
-    fn parse_switch_value<'a>(lexer: &mut Lexer<'a>) -> Result<i32, Error<'a>> {
+    fn parse_switch_value<'a>(
+        lexer: &mut Lexer<'a>,
+    ) -> Result<(ast::SwitchValue, Span), Error<'a>> {
         let token_span = lexer.next();
         match token_span.0 {
-            Token::Number(Ok(Number::U32(num))) => Ok(num as i32),
-            Token::Number(Ok(Number::I32(num))) => Ok(num),
+            Token::Number(Ok(Number::U32(num))) => Ok((ast::SwitchValue::U32(num), token_span.1)),
+            Token::Number(Ok(Number::I32(num))) => Ok((ast::SwitchValue::I32(num), token_span.1)),
             Token::Number(Err(e)) => Err(Error::BadNumber(token_span.1, e)),
             _ => Err(Error::Unexpected(token_span.1, ExpectedToken::Integer)),
         }
@@ -449,11 +451,17 @@ impl Parser {
                 ast::Expression::Literal(ast::Literal::Number(num))
             }
             (Token::Word(word), span) => {
+                let start = lexer.start_byte_offset();
                 let _ = lexer.next();
 
                 if let Some(ty) = self.parse_constructor_type(lexer, word, ctx.reborrow())? {
+                    let end = lexer.end_byte_offset();
                     let components = self.parse_arguments(lexer, ctx.reborrow())?;
-                    ast::Expression::Construct { ty, components }
+                    ast::Expression::Construct {
+                        ty,
+                        ty_span: start..end,
+                        components,
+                    }
                 } else {
                     if let Token::Paren('(') = lexer.peek().0 {
                         self.pop_rule_span(lexer);
@@ -1585,18 +1593,19 @@ impl Parser {
                             match lexer.next() {
                                 (Token::Word("case"), _) => {
                                     // parse a list of values
-                                    let value = loop {
-                                        let value = Self::parse_switch_value(lexer)?;
+                                    let (value, value_span) = loop {
+                                        let (value, value_span) = Self::parse_switch_value(lexer)?;
                                         if lexer.skip(Token::Separator(',')) {
                                             if lexer.skip(Token::Separator(':')) {
-                                                break value;
+                                                break (value, value_span);
                                             }
                                         } else {
                                             lexer.skip(Token::Separator(':'));
-                                            break value;
+                                            break (value, value_span);
                                         }
                                         cases.push(ast::SwitchCase {
-                                            value: crate::SwitchValue::Integer(value),
+                                            value,
+                                            value_span,
                                             body: ast::Block::default(),
                                             fall_through: true,
                                         });
@@ -1606,17 +1615,19 @@ impl Parser {
                                         self.parse_switch_case_body(lexer, ctx.reborrow())?;
 
                                     cases.push(ast::SwitchCase {
-                                        value: crate::SwitchValue::Integer(value),
+                                        value,
+                                        value_span,
                                         body,
                                         fall_through,
                                     });
                                 }
-                                (Token::Word("default"), _) => {
+                                (Token::Word("default"), value_span) => {
                                     lexer.skip(Token::Separator(':'));
                                     let (fall_through, body) =
                                         self.parse_switch_case_body(lexer, ctx.reborrow())?;
                                     cases.push(ast::SwitchCase {
-                                        value: crate::SwitchValue::Default,
+                                        value: ast::SwitchValue::Default,
+                                        value_span,
                                         body,
                                         fall_through,
                                     });
@@ -1910,6 +1921,7 @@ impl Parser {
         }
 
         let mut locals = Arena::new();
+        let mut local_table = SymbolTable::default();
 
         // read parameter list
         let mut arguments = Vec::new();
@@ -1936,10 +1948,14 @@ impl Parser {
             if crate::keywords::wgsl::RESERVED.contains(&param_name.name) {
                 return Err(Error::ReservedKeyword(param_name.span));
             }
+
+            let handle = locals.append(ast::Local, param_name.span.clone().into());
+            local_table.add(param_name.name, handle);
             arguments.push(ast::FunctionArgument {
                 name: param_name,
                 ty: param_type,
                 binding,
+                handle,
             });
             ready = lexer.skip(Token::Separator(','));
         }
@@ -1951,7 +1967,7 @@ impl Parser {
                 ExpressionContext {
                     expressions: &mut out.global_expressions,
                     global_expressions: None,
-                    local_table: &mut SymbolTable::default(),
+                    local_table: &mut local_table,
                     locals: &mut locals,
                     unresolved: dependencies,
                 },
@@ -1969,7 +1985,7 @@ impl Parser {
                 ExpressionContext {
                     expressions: &mut expressions,
                     global_expressions: Some(&mut out.global_expressions),
-                    local_table: &mut SymbolTable::default(),
+                    local_table: &mut local_table,
                     locals: &mut locals,
                     unresolved: dependencies,
                 },

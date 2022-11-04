@@ -40,6 +40,10 @@ pub enum ExpectedToken<'a> {
     GlobalItem,
     /// Expected a type.
     Type,
+    /// Access of `var`, `let`, `const`.
+    Variable,
+    /// Access of a function
+    Function,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
@@ -133,6 +137,11 @@ pub enum Error<'a> {
         path: Vec<(Span, Span)>,
     },
     ConstExprUnsupported(Span),
+    InvalidSwitchValue {
+        uint: bool,
+        span: Span,
+    },
+    CalledEntryPoint(Span),
     Other,
 }
 
@@ -180,6 +189,8 @@ impl<'a> Error<'a> {
                     ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
                     ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
                     ExpectedToken::Type => "type".to_string(),
+                    ExpectedToken::Variable => "variable access".to_string(),
+                    ExpectedToken::Function => "function name".to_string(),
                 };
                 ParseError {
                     message: format!(
@@ -573,6 +584,34 @@ impl<'a> Error<'a> {
                 message: "this constant expression is not supported".to_string(),
                 labels: vec![(span.clone(), "expression is not supported".into())],
                 notes: vec!["this should be fixed in a future version of Naga".into()],
+            },
+            Error::InvalidSwitchValue { uint, ref span } => ParseError {
+                message: "invalid switch value".to_string(),
+                labels: vec![(
+                    span.clone(),
+                    if uint {
+                        "expected unsigned integer"
+                    } else {
+                        "expected signed integer"
+                    }
+                    .into(),
+                )],
+                notes: vec![if uint {
+                    format!(
+                        "suffix the integer with a `u`: '{}u'",
+                        &source[span.clone()]
+                    )
+                } else {
+                    format!(
+                        "remove the `u` suffix: '{}'",
+                        &source[span.start..span.end - 1]
+                    )
+                }],
+            },
+            Error::CalledEntryPoint(ref span) => ParseError {
+                message: "entry point cannot be called".to_string(),
+                labels: vec![(span.clone(), "entry point cannot be called".into())],
+                notes: vec![],
             },
             Error::Other => ParseError {
                 message: "other error".to_string(),

@@ -1725,3 +1725,44 @@ fn cyclic_function() {
 "###,
     );
 }
+
+#[test]
+fn switch_signed_unsigned_mismatch() {
+    check(
+        "
+        fn x(y: u32) {
+	        switch y {
+		        case 1: {}
+	        }
+        }
+        ",
+        r###"error: invalid switch value
+  ┌─ wgsl:4:16
+  │
+4 │                 case 1: {}
+  │                      ^ expected unsigned integer
+  │
+  = note: suffix the integer with a `u`: '1u'
+
+"###,
+    );
+
+    check(
+        "
+        fn x(y: i32) {
+	        switch y {
+		        case 1u: {}
+	        }
+        }
+        ",
+        r###"error: invalid switch value
+  ┌─ wgsl:4:16
+  │
+4 │                 case 1u: {}
+  │                      ^^ expected signed integer
+  │
+  = note: remove the `u` suffix: '1'
+
+"###,
+    );
+}

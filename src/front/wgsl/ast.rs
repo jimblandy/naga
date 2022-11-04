@@ -61,6 +61,7 @@ pub struct FunctionArgument<'a> {
     pub name: Ident<'a>,
     pub ty: Type<'a>,
     pub binding: Option<crate::Binding>,
+    pub handle: Handle<Local>,
 }
 
 #[derive(Debug)]
@@ -227,8 +228,16 @@ pub enum StatementKind<'a> {
 }
 
 #[derive(Debug)]
+pub enum SwitchValue {
+    I32(i32),
+    U32(u32),
+    Default,
+}
+
+#[derive(Debug)]
 pub struct SwitchCase<'a> {
-    pub value: crate::SwitchValue,
+    pub value: SwitchValue,
+    pub value_span: Span,
     pub body: Block<'a>,
     pub fall_through: bool,
 }
@@ -261,9 +270,10 @@ pub enum ConstructorType<'a> {
         base: Type<'a>,
         size: ArraySize<'a>,
     },
+    Type(Handle<crate::Type>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Literal {
     Bool(bool),
     Number(Number),
@@ -275,6 +285,7 @@ pub enum Expression<'a> {
     Ident(IdentExpr<'a>),
     Construct {
         ty: ConstructorType<'a>,
+        ty_span: Span,
         components: Vec<Handle<Expression<'a>>>,
     },
     Unary {
