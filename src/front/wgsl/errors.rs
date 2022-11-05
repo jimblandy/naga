@@ -112,7 +112,7 @@ pub enum Error<'a> {
     UnknownLocalFunction(Span),
     TypeNotConstructible(Span),
     TypeNotInferrable(Span),
-    InitializationTypeMismatch(Span, String),
+    InitializationTypeMismatch(Span, String, String),
     MissingType(Span),
     MissingAttribute(&'static str, Span),
     InvalidAtomicPointer(Span),
@@ -449,18 +449,21 @@ impl<'a> Error<'a> {
                 labels: vec![(span.clone(), "type can't be inferred".into())],
                 notes: vec![],
             },
-            Error::InitializationTypeMismatch(ref name_span, ref expected_ty) => ParseError {
-                message: format!(
-                    "the type of `{}` is expected to be `{}`",
-                    &source[name_span.clone()],
-                    expected_ty
-                ),
-                labels: vec![(
-                    name_span.clone(),
-                    format!("definition of `{}`", &source[name_span.clone()]).into(),
-                )],
-                notes: vec![],
-            },
+            Error::InitializationTypeMismatch(ref name_span, ref expected_ty, ref got_ty) => {
+                ParseError {
+                    message: format!(
+                        "the type of `{}` is expected to be `{}`, but got `{}`",
+                        &source[name_span.clone()],
+                        expected_ty,
+                        got_ty,
+                    ),
+                    labels: vec![(
+                        name_span.clone(),
+                        format!("definition of `{}`", &source[name_span.clone()]).into(),
+                    )],
+                    notes: vec![],
+                }
+            }
             Error::MissingType(ref name_span) => ParseError {
                 message: format!("variable `{}` needs a type", &source[name_span.clone()]),
                 labels: vec![(

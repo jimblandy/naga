@@ -573,6 +573,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             return Err(Error::InitializationTypeMismatch(
                                 c.name.span.clone(),
                                 ctx.module.types[explicit].name.as_ref().unwrap().clone(),
+                                ctx.module.types[inferred_type]
+                                    .name
+                                    .as_ref()
+                                    .unwrap()
+                                    .clone(),
                             ));
                         }
                     }
@@ -720,9 +725,6 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         block: &mut crate::Block,
         mut ctx: StatementContext<'source, '_, '_>,
     ) -> Result<(), Error<'source>> {
-        let mut emitter = Emitter::default();
-        emitter.start(ctx.expressions);
-
         let out = match stmt.kind {
             ast::StatementKind::Block(ref block) => {
                 let block = self.lower_block(block, ctx.reborrow())?;
@@ -730,6 +732,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
             ast::StatementKind::VarDecl(ref decl) => match **decl {
                 VarDecl::Let(ref l) => {
+                    let mut emitter = Emitter::default();
+                    emitter.start(ctx.expressions);
+
                     let value =
                         self.lower_expression(l.init, ctx.as_expression(block, &mut emitter))?;
 
@@ -756,6 +761,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         {
                             return Err(Error::InitializationTypeMismatch(
                                 l.name.span.clone(),
+                                ctx.fmt_ty(ty).to_string(),
                                 ctx.fmt_ty(init_ty).to_string(),
                             ));
                         }
@@ -774,6 +780,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     return Ok(());
                 }
                 VarDecl::Var(ref v) => {
+                    let mut emitter = Emitter::default();
+                    emitter.start(ctx.expressions);
+
                     let value = v
                         .init
                         .map(|init| {
@@ -811,6 +820,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             {
                                 return Err(Error::InitializationTypeMismatch(
                                     v.name.span.clone(),
+                                    ctx.fmt_ty(explicit).to_string(),
                                     ctx.fmt_ty(inferred).to_string(),
                                 ));
                             }
@@ -833,8 +843,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     );
 
                     let handle = ctx
-                        .expressions
-                        .append(crate::Expression::LocalVariable(var), Span::UNDEFINED);
+                        .as_expression(block, &mut emitter)
+                        .interrupt_emitter(crate::Expression::LocalVariable(var), Span::UNDEFINED);
+                    block.extend(emitter.finish(ctx.expressions));
                     ctx.local_table.insert(
                         v.handle,
                         TypedExpression {
@@ -858,8 +869,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref accept,
                 ref reject,
             } => {
-                let expr = ctx.as_expression(block, &mut emitter);
-                let condition = self.lower_expression(condition, expr)?;
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
+                let condition =
+                    self.lower_expression(condition, ctx.as_expression(block, &mut emitter))?;
                 block.extend(emitter.finish(ctx.expressions));
 
                 let accept = self.lower_block(accept, ctx.reborrow())?;
@@ -875,6 +889,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 selector,
                 ref cases,
             } => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
                 let mut ectx = ctx.as_expression(block, &mut emitter);
                 let selector = self.lower_expression(selector, ectx.reborrow())?;
 
@@ -917,6 +934,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => {
                 let body = self.lower_block(body, ctx.reborrow())?;
                 let mut continuing = self.lower_block(continuing, ctx.reborrow())?;
+
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
                 let break_if = break_if
                     .map(|expr| self.lower_expression(expr, ctx.as_expression(block, &mut emitter)))
                     .transpose()?;
@@ -931,6 +951,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             ast::StatementKind::Break => crate::Statement::Break,
             ast::StatementKind::Continue => crate::Statement::Continue,
             ast::StatementKind::Return { value } => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
                 let value = value
                     .map(|expr| self.lower_expression(expr, ctx.as_expression(block, &mut emitter)))
                     .transpose()?;
@@ -943,6 +966,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref function,
                 ref arguments,
             } => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
                 let _ = self.call(
                     stmt.span.clone().into(),
                     function,
@@ -953,6 +979,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 return Ok(());
             }
             ast::StatementKind::Assign { target, op, value } => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
                 let target = self.lower_expression_for_reference(
                     target,
                     ctx.as_expression(block, &mut emitter),
@@ -999,7 +1028,77 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     value,
                 }
             }
+            ast::StatementKind::Increment(value) | ast::StatementKind::Decrement(value) => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
+                let op = match stmt.kind {
+                    ast::StatementKind::Increment(_) => crate::BinaryOperator::Add,
+                    ast::StatementKind::Decrement(_) => crate::BinaryOperator::Subtract,
+                    _ => unreachable!(),
+                };
+
+                let value_span = ctx.read_expressions.get_span(value).to_range().unwrap();
+                let reference = self.lower_expression_for_reference(
+                    value,
+                    ctx.as_expression(block, &mut emitter),
+                )?;
+                let mut ectx = ctx.as_expression(block, &mut emitter);
+
+                let ty = ectx.resolve_type(reference.handle)?;
+                let (kind, width) = match ectx.module.types[ty].inner {
+                    crate::TypeInner::ValuePointer {
+                        size: None,
+                        kind,
+                        width,
+                        ..
+                    } => (kind, width),
+                    crate::TypeInner::Pointer { base, .. } => match ectx.module.types[base].inner {
+                        crate::TypeInner::Scalar { kind, width } => (kind, width),
+                        _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                    },
+                    _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                };
+                let constant_inner = crate::ConstantInner::Scalar {
+                    width,
+                    value: match kind {
+                        crate::ScalarKind::Sint => crate::ScalarValue::Sint(1),
+                        crate::ScalarKind::Uint => crate::ScalarValue::Uint(1),
+                        _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                    },
+                };
+                let constant = ectx.module.constants.append(
+                    crate::Constant {
+                        name: None,
+                        specialization: None,
+                        inner: constant_inner,
+                    },
+                    Span::UNDEFINED,
+                );
+
+                let left = ectx.expressions.append(
+                    crate::Expression::Load {
+                        pointer: reference.handle,
+                    },
+                    value_span.into(),
+                );
+                let right =
+                    ectx.interrupt_emitter(crate::Expression::Constant(constant), Span::UNDEFINED);
+                let value = ectx.expressions.append(
+                    crate::Expression::Binary { op, left, right },
+                    stmt.span.clone().into(),
+                );
+
+                block.extend(emitter.finish(ctx.expressions));
+                crate::Statement::Store {
+                    pointer: reference.handle,
+                    value,
+                }
+            }
             ast::StatementKind::Ignore(expr) => {
+                let mut emitter = Emitter::default();
+                emitter.start(ctx.expressions);
+
                 let _ = self.lower_expression(expr, ctx.as_expression(block, &mut emitter))?;
                 block.extend(emitter.finish(ctx.expressions));
                 return Ok(());
@@ -1043,15 +1142,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         width: 4,
                         value: crate::ScalarValue::Uint(u as _),
                     },
-                    ast::Literal::Number(_) => {
-                        unreachable!("got abstract numeric type when not expected");
+                    ast::Literal::Number(x) => {
+                        panic!("got abstract numeric type when not expected: {:?}", x);
                     }
                     ast::Literal::Bool(b) => crate::ConstantInner::Scalar {
                         width: 1,
                         value: crate::ScalarValue::Bool(b),
                     },
                 };
-                let handle = ctx.module.constants.append(
+                let handle = ctx.module.constants.fetch_or_append(
                     crate::Constant {
                         name: None,
                         specialization: None,
@@ -1069,11 +1168,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 return Ok(ctx.local_table[&local])
             }
             ast::Expression::Ident(ast::IdentExpr::Unresolved(name)) => {
-                if let Some(global) = ctx.globals.get(name) {
-                    match *global {
-                        GlobalDecl::Var(handle) => {
-                            (crate::Expression::GlobalVariable(handle), true)
-                        }
+                return if let Some(global) = ctx.globals.get(name) {
+                    let (expr, is_reference) = match *global {
+                        GlobalDecl::Var(handle) => (
+                            crate::Expression::GlobalVariable(handle),
+                            ctx.module.global_variables[handle].space
+                                != crate::AddressSpace::Handle,
+                        ),
                         GlobalDecl::Const(handle) => (crate::Expression::Constant(handle), false),
                         _ => {
                             return Err(Error::Unexpected(
@@ -1081,9 +1182,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 ExpectedToken::Variable,
                             ));
                         }
-                    }
+                    };
+
+                    let handle = ctx.interrupt_emitter(expr, span);
+                    Ok(TypedExpression {
+                        handle,
+                        is_reference,
+                    })
                 } else {
-                    return Err(Error::UnknownIdent(span.to_range().unwrap(), name));
+                    Err(Error::UnknownIdent(span.to_range().unwrap(), name))
                 }
             }
             ast::Expression::Construct {
@@ -1200,20 +1307,46 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
             }
             ast::Expression::Member { base, ref field } => {
-                let base = self.lower_expression_for_reference(base, ctx.reborrow())?;
+                let TypedExpression {
+                    handle,
+                    is_reference,
+                } = self.lower_expression_for_reference(base, ctx.reborrow())?;
 
-                let ty = ctx.resolve_type(base.handle)?;
-                let base_ty = &ctx.module.types[ty].inner;
-                let wgsl_pointer = base_ty.pointer_space().is_some() && !base.is_reference;
+                let ty = ctx.resolve_type(handle)?;
+                let temp_inner;
+                let (composite, wgsl_pointer) = match ctx.module.types[ty].inner {
+                    crate::TypeInner::Pointer { base, .. } => {
+                        (&ctx.module.types[base].inner, !is_reference)
+                    }
+                    crate::TypeInner::ValuePointer {
+                        size: None,
+                        kind,
+                        width,
+                        ..
+                    } => {
+                        temp_inner = crate::TypeInner::Scalar { kind, width };
+                        (&temp_inner, !is_reference)
+                    }
+                    crate::TypeInner::ValuePointer {
+                        size: Some(size),
+                        kind,
+                        width,
+                        ..
+                    } => {
+                        temp_inner = crate::TypeInner::Vector { size, kind, width };
+                        (&temp_inner, !is_reference)
+                    }
+                    ref other => (other, false),
+                };
 
                 if wgsl_pointer {
                     return Err(Error::Pointer(
                         "the value accessed by a `.member` expression",
-                        ctx.expressions.get_span(base.handle).to_range().unwrap(),
+                        ctx.expressions.get_span(handle).to_range().unwrap(),
                     ));
                 }
 
-                let access = match *base_ty {
+                let access = match *composite {
                     crate::TypeInner::Struct { ref members, .. } => {
                         let index = members
                             .iter()
@@ -1223,16 +1356,19 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                         (
                             crate::Expression::AccessIndex {
-                                base: base.handle,
+                                base: handle,
                                 index,
                             },
-                            base.is_reference,
+                            is_reference,
                         )
                     }
                     crate::TypeInner::Vector { .. } | crate::TypeInner::Matrix { .. } => {
                         match Composition::make(field.name, Span::from(field.span.clone()))? {
                             Composition::Multi(size, pattern) => {
-                                let vector = ctx.apply_load_rule(base);
+                                let vector = ctx.apply_load_rule(TypedExpression {
+                                    handle,
+                                    is_reference,
+                                });
 
                                 (
                                     crate::Expression::Swizzle {
@@ -1245,10 +1381,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             }
                             Composition::Single(index) => (
                                 crate::Expression::AccessIndex {
-                                    base: base.handle,
+                                    base: handle,
                                     index,
                                 },
-                                base.is_reference,
+                                is_reference,
                             ),
                         }
                     }
@@ -1327,11 +1463,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     .iter()
                     .map(|&arg| self.lower_expression(arg, ctx.reborrow()))
                     .collect::<Result<Vec<_>, _>>()?;
-                let result = ctx.module.functions[function]
-                    .result
-                    .is_some()
-                    .then(|| ctx.interrupt_emitter(crate::Expression::CallResult(function), span));
 
+                ctx.block.extend(ctx.emitter.finish(ctx.expressions));
+                let result = ctx.module.functions[function].result.is_some().then(|| {
+                    ctx.expressions
+                        .append(crate::Expression::CallResult(function), span)
+                });
+                ctx.emitter.start(ctx.expressions);
                 ctx.block.push(
                     crate::Statement::Call {
                         function,
@@ -2013,10 +2151,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let mut args = ctx.prepare_args(args, 2, span);
 
         let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
+
         let value = args.next()?;
         let value_span = ctx.read_expressions.get_span(value);
         let value = self.lower_expression(value, ctx.reborrow())?;
-        let ty = ctx.resolve_type(pointer)?;
+
+        let ty = ctx.resolve_type(value)?;
 
         args.finish()?;
 
@@ -2822,8 +2962,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         width: 4,
                         value: crate::ScalarValue::Uint(u as _),
                     },
-                    ast::Literal::Number(_) => {
-                        unreachable!("got abstract numeric type when not expected");
+                    ast::Literal::Number(x) => {
+                        panic!("got abstract numeric type when not expected: {:?}", x);
                     }
                     ast::Literal::Bool(b) => crate::ConstantInner::Scalar {
                         width: 1,

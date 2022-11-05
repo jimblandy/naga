@@ -326,7 +326,17 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let expr = self.parse_general_expression(lexer, ctx)?;
+                    let expr = self.parse_unary_expression(
+                        lexer,
+                        ExpressionContext {
+                            expressions: match ctx.global_expressions {
+                                Some(x) => x,
+                                None => ctx.expressions,
+                            },
+                            global_expressions: None,
+                            ..ctx
+                        },
+                    )?;
                     ast::ArraySize::Constant(expr)
                 } else {
                     ast::ArraySize::Dynamic
@@ -464,6 +474,9 @@ impl Parser {
                     }
                 } else {
                     if let Token::Paren('(') = lexer.peek().0 {
+                        self.pop_rule_span(lexer);
+                        return self.parse_function_call(lexer, word, span, ctx);
+                    } else if word == "bitcast" {
                         self.pop_rule_span(lexer);
                         return self.parse_function_call(lexer, word, span, ctx);
                     } else {
@@ -976,14 +989,15 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let size = self.parse_general_expression(
+                    let size = self.parse_unary_expression(
                         lexer,
                         ExpressionContext {
-                            expressions: ctx.global_expressions(),
+                            expressions: match ctx.global_expressions {
+                                Some(x) => x,
+                                None => ctx.expressions,
+                            },
                             global_expressions: None,
-                            local_table: &mut SymbolTable::default(),
-                            locals: &mut Arena::new(),
-                            unresolved: &mut FastHashSet::default(),
+                            ..ctx
                         },
                     )?;
                     ast::ArraySize::Constant(size)
@@ -1001,14 +1015,15 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let size = self.parse_general_expression(
+                    let size = self.parse_unary_expression(
                         lexer,
                         ExpressionContext {
-                            expressions: ctx.global_expressions(),
+                            expressions: match ctx.global_expressions {
+                                Some(x) => x,
+                                None => ctx.expressions,
+                            },
                             global_expressions: None,
-                            local_table: &mut SymbolTable::default(),
-                            locals: &mut Arena::new(),
-                            unresolved: &mut FastHashSet::default(),
+                            ..ctx
                         },
                     )?;
                     ast::ArraySize::Constant(size)
@@ -1279,18 +1294,17 @@ impl Parser {
             }
             token @ (Token::IncrementOperation | Token::DecrementOperation, _) => {
                 let op = match token.0 {
-                    Token::IncrementOperation => Bo::Add,
-                    Token::DecrementOperation => Bo::Subtract,
+                    Token::IncrementOperation => ast::StatementKind::Increment,
+                    Token::DecrementOperation => ast::StatementKind::Decrement,
                     _ => unreachable!(),
                 };
-                let op_span = token.1;
 
-                let value = ctx.expressions.append(
-                    ast::Expression::Literal(ast::Literal::Number(Number::AbstractInt(1))),
-                    op_span.into(),
-                );
-
-                (Some(op), value)
+                let span_end = lexer.end_byte_offset();
+                block.stmts.push(ast::Statement {
+                    kind: op(target),
+                    span: span_start..span_end,
+                });
+                return Ok(());
             }
             other => return Err(Error::Unexpected(other.1, ExpectedToken::SwitchItem)),
         };
@@ -1359,19 +1373,16 @@ impl Parser {
         let span_start = lexer.start_byte_offset();
         match lexer.peek() {
             (Token::Word(name), span) => {
+                // A little hack for 2 token lookahead.
+                let cloned = lexer.clone();
                 let _ = lexer.next();
                 match lexer.peek() {
                     (Token::Paren('('), _) => {
                         self.parse_function_statement(lexer, name, span, context.reborrow(), block)
                     }
                     _ => {
-                        let expr = ast::Expression::Ident(self.parse_ident_expr(
-                            name,
-                            span.clone(),
-                            context.reborrow(),
-                        ));
-                        let target = context.expressions.append(expr, NagaSpan::from(span));
-                        self.parse_assignment_op_and_rhs(lexer, context, block, target, span_start)
+                        *lexer = cloned;
+                        self.parse_assignment_statement(lexer, context.reborrow(), block)
                     }
                 }
             }

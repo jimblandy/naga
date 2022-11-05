@@ -29,9 +29,7 @@ fn loopLexicalScope(a: bool) {
 
 fn forLexicalScope(a: f32) {
     let a = false;
-    for (var a = 0; a < 1; a++) {
-        let a = 3.0;
-    }
+    for (var a = 0; a < 1; a++) {}
     let test = a == true;
 }
 

@@ -142,7 +142,21 @@ impl crate::TypeInner {
                 let base = member_type.name.as_deref().unwrap_or("unknown");
                 match size {
                     crate::ArraySize::Constant(size) => {
-                        let size = constants[size].name.as_deref().unwrap_or("unknown");
+                        let constant = &constants[size];
+                        let size = constant
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| match constant.inner {
+                                crate::ConstantInner::Scalar {
+                                    value: crate::ScalarValue::Uint(size),
+                                    ..
+                                } => size.to_string(),
+                                crate::ConstantInner::Scalar {
+                                    value: crate::ScalarValue::Sint(size),
+                                    ..
+                                } => size.to_string(),
+                                _ => "?".to_string(),
+                            });
                         format!("array<{}, {}>", base, size)
                     }
                     crate::ArraySize::Dynamic => format!("array<{}>", base),

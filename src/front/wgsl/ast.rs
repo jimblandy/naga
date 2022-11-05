@@ -224,6 +224,8 @@ pub enum StatementKind<'a> {
         op: Option<crate::BinaryOperator>,
         value: Handle<Expression<'a>>,
     },
+    Increment(Handle<Expression<'a>>),
+    Decrement(Handle<Expression<'a>>),
     Ignore(Handle<Expression<'a>>),
 }
 

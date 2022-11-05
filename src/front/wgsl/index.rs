@@ -12,11 +12,12 @@ impl<'a> Index<'a> {
 
         // Populate dependencies
         for (handle, decl) in tu.decls.iter() {
-            let name = decl_ident(decl).name;
+            let ident = decl_ident(decl).clone();
+            let name = ident.name;
             if let Some(old) = globals.insert(name, handle) {
                 return Err(Error::Redefinition {
-                    previous: tu.decls.get_span(old).to_range().unwrap(),
-                    current: tu.decls.get_span(handle).to_range().unwrap(),
+                    previous: decl_ident(&tu.decls[old]).span.clone(),
+                    current: ident.span,
                 });
             }
         }
