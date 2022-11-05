@@ -148,11 +148,11 @@ void test_matrix_within_struct_accesses()
     float2 unnamed_1 = GetMatmOnBaz(baz)[0];
     int _expr15 = idx;
     float2 unnamed_2 = GetMatmOnBaz(baz)[_expr15];
-    float unnamed_3 = GetMatmOnBaz(baz)[0][1];
+    float unnamed_3 = GetMatmOnBaz(baz)[0].y;
     int _expr29 = idx;
     float unnamed_4 = GetMatmOnBaz(baz)[0][_expr29];
     int _expr34 = idx;
-    float unnamed_5 = GetMatmOnBaz(baz)[_expr34][1];
+    float unnamed_5 = GetMatmOnBaz(baz)[_expr34].y;
     int _expr41 = idx;
     int _expr43 = idx;
     float unnamed_6 = GetMatmOnBaz(baz)[_expr41][_expr43];
@@ -193,11 +193,11 @@ void test_matrix_within_array_within_struct_accesses()
     float2 unnamed_9 = nested_mat_cx2_.am[0]._0;
     int _expr24 = idx_1;
     float2 unnamed_10 = __get_col_of_mat4x2(nested_mat_cx2_.am[0], _expr24);
-    float unnamed_11 = nested_mat_cx2_.am[0]._0[1];
+    float unnamed_11 = nested_mat_cx2_.am[0]._0.y;
     int _expr42 = idx_1;
     float unnamed_12 = nested_mat_cx2_.am[0]._0[_expr42];
     int _expr49 = idx_1;
-    float unnamed_13 = __get_col_of_mat4x2(nested_mat_cx2_.am[0], _expr49)[1];
+    float unnamed_13 = __get_col_of_mat4x2(nested_mat_cx2_.am[0], _expr49).y;
     int _expr58 = idx_1;
     int _expr60 = idx_1;
     float unnamed_14 = __get_col_of_mat4x2(nested_mat_cx2_.am[0], _expr58)[_expr60];
@@ -209,7 +209,7 @@ void test_matrix_within_array_within_struct_accesses()
     t_1.am[0]._0 = (9.0).xx;
     int _expr93 = idx_1;
     __set_col_of_mat4x2(t_1.am[0], _expr93, (90.0).xx);
-    t_1.am[0]._0[1] = 10.0;
+    t_1.am[0]._0.y = 10.0;
     int _expr110 = idx_1;
     t_1.am[0]._0[_expr110] = 20.0;
     int _expr116 = idx_1;

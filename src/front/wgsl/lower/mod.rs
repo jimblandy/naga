@@ -1293,7 +1293,6 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
 
                 if let crate::Expression::Constant(constant) = ctx.expressions[index] {
-                    use std::convert::TryFrom;
                     let span = ctx.expressions.get_span(index).to_range().unwrap();
                     let index = match ctx.module.constants[constant].inner {
                         crate::ConstantInner::Scalar {

@@ -1188,6 +1188,17 @@ impl<W: Write> Writer<W> {
         value: Handle<crate::Expression>,
         context: &ExpressionContext,
     ) -> BackendResult {
+        self.put_atomic_operation(pointer, "fetch_", key, value, context)
+    }
+
+    fn put_atomic_operation(
+        &mut self,
+        pointer: Handle<crate::Expression>,
+        key1: &str,
+        key2: &str,
+        value: Handle<crate::Expression>,
+        context: &ExpressionContext,
+    ) -> BackendResult {
         // If the pointer we're passing to the atomic operation needs to be conditional
         // for `ReadZeroSkipWrite`, the condition needs to *surround* the atomic op, and
         // the pointer operand should be unchecked.
@@ -1202,8 +1213,8 @@ impl<W: Write> Writer<W> {
 
         write!(
             self.out,
-            "{}::atomic_fetch_{}_explicit({}",
-            NAMESPACE, key, ATOMIC_REFERENCE
+            "{}::atomic_{}{}_explicit({}",
+            NAMESPACE, key1, key2, ATOMIC_REFERENCE
         )?;
         self.put_access_chain(pointer, policy, context)?;
         write!(self.out, ", ")?;
@@ -1429,7 +1440,7 @@ impl<W: Write> Writer<W> {
                         // Offset always comes before the gather, except
                         // in cube maps where it's not applicable
                         if offset.is_none() && !is_cube_map {
-                            write!(self.out, ", int2(0)")?;
+                            write!(self.out, ", {}::int2(0)", NAMESPACE)?;
                         }
                         let letter = ['x', 'y', 'z', 'w'][component as usize];
                         write!(self.out, ", {}::component::{}", NAMESPACE, letter)?;
@@ -2725,15 +2736,13 @@ impl<W: Write> Writer<W> {
                             self.put_atomic_fetch(pointer, "max", value, &context.expression)?;
                         }
                         crate::AtomicFunction::Exchange { compare: None } => {
-                            write!(
-                                self.out,
-                                "{}::atomic_exchange_explicit({}",
-                                NAMESPACE, ATOMIC_REFERENCE,
+                            self.put_atomic_operation(
+                                pointer,
+                                "exchange",
+                                "",
+                                value,
+                                &context.expression,
                             )?;
-                            self.put_expression(pointer, &context.expression, true)?;
-                            write!(self.out, ", ")?;
-                            self.put_expression(value, &context.expression, true)?;
-                            write!(self.out, ", {}::memory_order_relaxed)", NAMESPACE)?;
                         }
                         crate::AtomicFunction::Exchange { .. } => {
                             return Err(Error::FeatureNotImplemented(
@@ -3946,12 +3955,13 @@ fn test_stack_size() {
 
     {
         // check expression stack
-        let mut addresses = usize::MAX..0usize;
+        let mut addresses_start = usize::MAX;
+        let mut addresses_end = 0usize;
         for pointer in writer.put_expression_stack_pointers {
-            addresses.start = addresses.start.min(pointer as usize);
-            addresses.end = addresses.end.max(pointer as usize);
+            addresses_start = addresses_start.min(pointer as usize);
+            addresses_end = addresses_end.max(pointer as usize);
         }
-        let stack_size = addresses.end - addresses.start;
+        let stack_size = addresses_end - addresses_start;
         // check the size (in debug only)
         // last observed macOS value: 20528 (CI)
         if !(11000..=25000).contains(&stack_size) {
@@ -3961,12 +3971,13 @@ fn test_stack_size() {
 
     {
         // check block stack
-        let mut addresses = usize::MAX..0usize;
+        let mut addresses_start = usize::MAX;
+        let mut addresses_end = 0usize;
         for pointer in writer.put_block_stack_pointers {
-            addresses.start = addresses.start.min(pointer as usize);
-            addresses.end = addresses.end.max(pointer as usize);
+            addresses_start = addresses_start.min(pointer as usize);
+            addresses_end = addresses_end.max(pointer as usize);
         }
-        let stack_size = addresses.end - addresses.start;
+        let stack_size = addresses_end - addresses_start;
         // check the size (in debug only)
         // last observed macOS value: 19152 (CI)
         if !(9500..=20000).contains(&stack_size) {

@@ -10,7 +10,7 @@ fn gather_inputs(folder: &str, extension: &str) -> Vec<Box<[u8]>> {
     for file_entry in read_dir {
         match file_entry {
             Ok(entry) => match entry.path().extension() {
-                Some(ostr) if &*ostr == extension => {
+                Some(ostr) if ostr == extension => {
                     let input = fs::read(entry.path()).unwrap_or_default();
                     list.push(input.into_boxed_slice());
                 }
@@ -248,7 +248,9 @@ fn backends(c: &mut Criterion) {
                         entry_point: ep.name.clone(),
                         multiview: None,
                     };
-                    match naga::back::glsl::Writer::new(
+
+                    // might be `Err` if missing features
+                    if let Ok(mut writer) = naga::back::glsl::Writer::new(
                         &mut string,
                         module,
                         info,
@@ -256,13 +258,9 @@ fn backends(c: &mut Criterion) {
                         &pipeline_options,
                         naga::proc::BoundsCheckPolicies::default(),
                     ) {
-                        Ok(mut writer) => {
-                            let _ = writer.write(); // can error if unsupported
-                        }
-                        Err(_) => {
-                            // missing features
-                        }
-                    };
+                        let _ = writer.write(); // might be `Err` if unsupported
+                    }
+
                     string.clear();
                 }
             }
