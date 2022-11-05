@@ -55,12 +55,6 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         }
         Ok(accumulator)
     }
-
-    fn global_expressions(&mut self) -> &mut Arena<ast::Expression<'a>> {
-        self.global_expressions
-            .as_deref_mut()
-            .unwrap_or(self.expressions)
-    }
 }
 
 #[derive(Default)]
@@ -1370,7 +1364,6 @@ impl Parser {
         mut context: ExpressionContext<'a, '_, 'out>,
         block: &'out mut ast::Block<'a>,
     ) -> Result<(), Error<'a>> {
-        let span_start = lexer.start_byte_offset();
         match lexer.peek() {
             (Token::Word(name), span) => {
                 // A little hack for 2 token lookahead.

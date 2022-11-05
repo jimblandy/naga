@@ -22,7 +22,6 @@ pub enum ExpectedToken<'a> {
     Identifier,
     Number(NumberType),
     Integer,
-    Constant,
     /// Expected: constant, parenthesized expression, identifier
     PrimaryExpression,
     /// Expected: assignment, increment/decrement expression
@@ -31,8 +30,6 @@ pub enum ExpectedToken<'a> {
     FieldName,
     /// Expected: attribute for a type
     TypeAttribute,
-    /// Expected: ';', '{', word
-    Statement,
     /// Expected: 'case', 'default', '}'
     SwitchItem,
     /// Expected: ',', ')'
@@ -45,6 +42,8 @@ pub enum ExpectedToken<'a> {
     Variable,
     /// Access of a function
     Function,
+    /// A compile-time constant expression.
+    Constant,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
@@ -91,7 +90,7 @@ pub enum Error<'a> {
     InvalidForInitializer(Span),
     /// A break if appeared outside of a continuing block
     InvalidBreakIf(Span),
-    InvalidGatherComponent(Span, u32),
+    InvalidGatherComponent(Span),
     InvalidConstructorComponentType(Span, i32),
     InvalidIdentifierUnderscore(Span),
     ReservedIdentifierPrefix(Span),
@@ -99,7 +98,6 @@ pub enum Error<'a> {
     UnknownAttribute(Span),
     UnknownBuiltin(Span),
     UnknownAccess(Span),
-    UnknownShaderStage(Span),
     UnknownIdent(Span, &'a str),
     UnknownScalarType(Span),
     UnknownType(Span),
@@ -109,7 +107,6 @@ pub enum Error<'a> {
     AlignAttributeTooLow(Span, Alignment),
     NonPowerOfTwoAlignAttribute(Span),
     InconsistentBinding(Span),
-    UnknownLocalFunction(Span),
     TypeNotConstructible(Span),
     TypeNotInferrable(Span),
     InitializationTypeMismatch(Span, String, String),
@@ -186,18 +183,17 @@ impl<'a> Error<'a> {
                         }.to_string()
                     },
                     ExpectedToken::Integer => "unsigned/signed integer literal".to_string(),
-                    ExpectedToken::Constant => "constant".to_string(),
                     ExpectedToken::PrimaryExpression => "expression".to_string(),
                     ExpectedToken::Assignment => "assignment or increment/decrement".to_string(),
                     ExpectedToken::FieldName => "field name or a closing curly bracket to signify the end of the struct".to_string(),
                     ExpectedToken::TypeAttribute => "type attribute".to_string(),
-                    ExpectedToken::Statement => "statement".to_string(),
                     ExpectedToken::SwitchItem => "switch item ('case' or 'default') or a closing curly bracket to signify the end of the switch statement ('}')".to_string(),
                     ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
                     ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
                     ExpectedToken::Type => "type".to_string(),
                     ExpectedToken::Variable => "variable access".to_string(),
                     ExpectedToken::Function => "function name".to_string(),
+                    ExpectedToken::Constant => "compile-time constant".to_string(),
                 };
                 ParseError {
                     message: format!(
@@ -330,10 +326,10 @@ impl<'a> Error<'a> {
                 labels: vec![(bad_span.clone(), "not in a continuing block".into())],
                 notes: vec![],
             },
-            Error::InvalidGatherComponent(ref bad_span, component) => ParseError {
+            Error::InvalidGatherComponent(ref bad_span) => ParseError {
                 message: format!(
-                    "textureGather component {} doesn't exist, must be 0, 1, 2, or 3",
-                    component
+                    "textureGather component '{}' doesn't exist, must be 0, 1, 2, or 3",
+                    &source[bad_span.clone()]
                 ),
                 labels: vec![(bad_span.clone(), "invalid component".into())],
                 notes: vec![],
@@ -382,11 +378,6 @@ impl<'a> Error<'a> {
                 labels: vec![(bad_span.clone(), "unknown access".into())],
                 notes: vec![],
             },
-            Error::UnknownShaderStage(ref bad_span) => ParseError {
-                message: format!("unknown shader stage: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown shader stage".into())],
-                notes: vec![],
-            },
             Error::UnknownStorageFormat(ref bad_span) => ParseError {
                 message: format!("unknown storage format: '{}'", &source[bad_span.clone()]),
                 labels: vec![(bad_span.clone(), "unknown storage format".into())],
@@ -432,11 +423,6 @@ impl<'a> Error<'a> {
                     span.clone(),
                     "input/output binding is not consistent".into(),
                 )],
-                notes: vec![],
-            },
-            Error::UnknownLocalFunction(ref span) => ParseError {
-                message: format!("unknown local function `{}`", &source[span.clone()]),
-                labels: vec![(span.clone(), "unknown local function".into())],
                 notes: vec![],
             },
             Error::TypeNotConstructible(ref span) => ParseError {

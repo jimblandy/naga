@@ -1,5 +1,5 @@
 use crate::front::wgsl::ast::{
-    ArraySize, ConstructorType, GlobalDeclKind, TranslationUnit, TypeKind, VarDecl,
+    ConstructorType, GlobalDeclKind, TranslationUnit, TypeKind, VarDecl,
 };
 use crate::front::wgsl::errors::{Error, ExpectedToken, InvalidAssignmentType};
 use crate::front::wgsl::index::Index;
@@ -8,6 +8,8 @@ use crate::front::wgsl::{ast, conv};
 use crate::front::{Emitter, Typifier};
 use crate::proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, TypeResolution};
 use crate::{Arena, FastHashMap, Handle, NamedExpressions, Span};
+
+mod construct;
 
 enum GlobalDecl {
     Function(Handle<crate::Function>),
@@ -18,6 +20,7 @@ enum GlobalDecl {
 }
 
 struct OutputContext<'source, 'temp, 'out> {
+    read_expressions: Option<&'temp Arena<ast::Expression<'source>>>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
     module: &'out mut crate::Module,
@@ -26,6 +29,7 @@ struct OutputContext<'source, 'temp, 'out> {
 impl<'source> OutputContext<'source, '_, '_> {
     fn reborrow(&mut self) -> OutputContext<'source, '_, '_> {
         OutputContext {
+            read_expressions: self.read_expressions.as_deref(),
             global_expressions: self.global_expressions,
             globals: self.globals,
             module: self.module,
@@ -462,6 +466,11 @@ impl Composition {
     }
 }
 
+enum ConstantOrInner {
+    Constant(Handle<crate::Constant>),
+    Inner(crate::ConstantInner),
+}
+
 pub struct Lowerer<'source, 'temp> {
     index: &'temp Index<'source>,
     layouter: Layouter,
@@ -492,6 +501,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         f,
                         span,
                         OutputContext {
+                            read_expressions: None,
                             global_expressions: &tu.global_expressions,
                             globals: &mut globals,
                             module: &mut module,
@@ -501,6 +511,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
                 GlobalDeclKind::Var(ref v) => {
                     let mut ctx = OutputContext {
+                        read_expressions: None,
                         global_expressions: &tu.global_expressions,
                         globals: &mut globals,
                         module: &mut module,
@@ -534,6 +545,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
                 GlobalDeclKind::Const(ref c) => {
                     let mut ctx = OutputContext {
+                        read_expressions: None,
                         global_expressions: &tu.global_expressions,
                         globals: &mut globals,
                         module: &mut module,
@@ -542,7 +554,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     let inner = self.constant_inner(
                         &ctx.global_expressions[c.init],
                         ctx.global_expressions.get_span(c.init),
+                        ctx.reborrow(),
                     )?;
+                    let inner = match inner {
+                        ConstantOrInner::Constant(c) => ctx.module.constants[c].inner.clone(),
+                        ConstantOrInner::Inner(inner) => inner,
+                    };
+
                     let inferred_type = match inner {
                         crate::ConstantInner::Scalar { width, value } => self.ensure_type_exists(
                             crate::TypeInner::Scalar {
@@ -589,6 +607,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         s,
                         span,
                         OutputContext {
+                            read_expressions: None,
                             global_expressions: &tu.global_expressions,
                             globals: &mut globals,
                             module: &mut module,
@@ -600,6 +619,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     let ty = self.resolve_type(
                         &alias.ty,
                         OutputContext {
+                            read_expressions: None,
                             global_expressions: &tu.global_expressions,
                             globals: &mut globals,
                             module: &mut module,
@@ -744,6 +764,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 self.resolve_type(
                                     ty,
                                     OutputContext {
+                                        read_expressions: None,
                                         global_expressions: ctx.global_expressions,
                                         globals: ctx.globals,
                                         module: ctx.module,
@@ -803,6 +824,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 self.resolve_type(
                                     ty,
                                     OutputContext {
+                                        read_expressions: None,
                                         global_expressions: ctx.global_expressions,
                                         globals: ctx.globals,
                                         module: ctx.module,
@@ -1398,6 +1420,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let to_resolved = self.resolve_type(
                     to,
                     OutputContext {
+                        read_expressions: None,
                         global_expressions: ctx.global_expressions,
                         globals: ctx.globals,
                         module: ctx.module,
@@ -1562,6 +1585,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let value = self.lower_expression(args.next()?, ctx.reborrow())?;
                             args.finish()?;
 
+                            ctx.block.extend(ctx.emitter.finish(ctx.expressions));
+                            ctx.emitter.start(ctx.expressions);
                             ctx.block
                                 .push(crate::Statement::Store { pointer, value }, span);
                             return Ok(None);
@@ -1708,6 +1733,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             args.finish()?;
 
+                            ctx.block.extend(ctx.emitter.finish(ctx.expressions));
+                            ctx.emitter.start(ctx.expressions);
                             let stmt = crate::Statement::ImageStore {
                                 image,
                                 coordinate,
@@ -1743,6 +1770,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -1793,6 +1821,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -1843,6 +1872,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -1894,6 +1924,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -1944,6 +1975,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -1994,6 +2026,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         &ctx.read_expressions[arg],
                                         ctx.read_expressions.get_span(arg),
                                         OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
                                             global_expressions: ctx.global_expressions,
                                             globals: ctx.globals,
                                             module: ctx.module,
@@ -2016,8 +2049,116 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 depth_ref: Some(reference),
                             }
                         }
-                        "textureGather" => unreachable!(),
-                        "textureGatherCompare" => unreachable!(),
+                        "textureGather" => {
+                            let mut args = ctx.prepare_args(arguments, 3, span);
+
+                            let mut image_or_component = args.next()?;
+                            let component =
+                                match self.gather_component(image_or_component, ctx.reborrow())? {
+                                    Some(x) => {
+                                        image_or_component = args.next()?;
+                                        x
+                                    }
+                                    None => crate::SwizzleComponent::X,
+                                };
+
+                            let image = image_or_component;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: Some(component),
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Zero,
+                                depth_ref: None,
+                            }
+                        }
+                        "textureGatherCompare" => {
+                            let mut args = ctx.prepare_args(arguments, 4, span);
+
+                            let image = args.next()?;
+                            let image_span =
+                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image = self.lower_expression(image, ctx.reborrow())?;
+
+                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let array_index = if sc.arrayed {
+                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
+                            } else {
+                                None
+                            };
+
+                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+                            let offset = args
+                                .next()
+                                .map(|arg| {
+                                    self.constant(
+                                        &ctx.read_expressions[arg],
+                                        ctx.read_expressions.get_span(arg),
+                                        OutputContext {
+                                            read_expressions: Some(ctx.read_expressions),
+                                            global_expressions: ctx.global_expressions,
+                                            globals: ctx.globals,
+                                            module: ctx.module,
+                                        },
+                                    )
+                                })
+                                .ok()
+                                .transpose()?;
+
+                            args.finish()?;
+
+                            crate::Expression::ImageSample {
+                                image: sc.image,
+                                sampler,
+                                gather: Some(crate::SwizzleComponent::X),
+                                coordinate,
+                                array_index,
+                                offset,
+                                level: crate::SampleLevel::Zero,
+                                depth_ref: Some(reference),
+                            }
+                        }
                         "textureLoad" => {
                             let mut args = ctx.prepare_args(arguments, 3, span);
 
@@ -2186,562 +2327,50 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         Ok(result)
     }
 
-    fn construct(
+    fn gather_component(
         &mut self,
-        span: Span,
-        constructor: &ConstructorType<'source>,
-        c_span: super::Span,
-        components: &[Handle<ast::Expression<'source>>],
-        mut ctx: ExpressionContext<'source, '_, '_>,
-    ) -> Result<Handle<crate::Expression>, Error<'source>> {
-        enum Components {
-            None,
-            One {
-                component: Handle<crate::Expression>,
-                span: Span,
-                ty: Handle<crate::Type>,
-                ty_inner: crate::TypeInner,
-            },
-            Many {
-                components: Vec<Handle<crate::Expression>>,
-                spans: Vec<Span>,
-                first_component_ty_inner: crate::TypeInner,
-            },
-        }
+        expr: Handle<ast::Expression<'source>>,
+        ctx: ExpressionContext<'source, '_, '_>,
+    ) -> Result<Option<crate::SwizzleComponent>, Error<'source>> {
+        let span = ctx.read_expressions.get_span(expr);
 
-        impl Components {
-            fn into_components_vec(self) -> Vec<Handle<crate::Expression>> {
-                match self {
-                    Components::None => vec![],
-                    Components::One { component, .. } => vec![component],
-                    Components::Many { components, .. } => components,
-                }
-            }
-        }
-
-        enum ConcreteConstructor {
-            PartialVector {
-                size: crate::VectorSize,
-            },
-            PartialMatrix {
-                columns: crate::VectorSize,
-                rows: crate::VectorSize,
-            },
-            PartialArray,
-            Type(Handle<crate::Type>, crate::TypeInner),
-        }
-
-        impl ConcreteConstructor {
-            fn to_error_string(&self, ctx: ExpressionContext) -> String {
-                match *self {
-                    ConcreteConstructor::PartialVector { size } => {
-                        format!("vec{}<?>", size as u32,)
-                    }
-                    ConcreteConstructor::PartialMatrix { columns, rows } => {
-                        format!("mat{}x{}<?>", columns as u32, rows as u32,)
-                    }
-                    ConcreteConstructor::PartialArray => "array<?, ?>".to_string(),
-                    ConcreteConstructor::Type(ty, _) => ctx.fmt_ty(ty).to_string(),
-                }
-            }
-        }
-
-        let mut octx = OutputContext {
-            global_expressions: ctx.global_expressions,
-            globals: ctx.globals,
-            module: ctx.module,
-        };
-        let constructor = match *constructor {
-            ConstructorType::Scalar { width, kind } => {
-                let ty = self
-                    .ensure_type_exists(crate::TypeInner::Scalar { width, kind }, octx.reborrow());
-                ConcreteConstructor::Type(ty, ctx.module.types[ty].inner.clone())
-            }
-            ConstructorType::PartialVector { size } => ConcreteConstructor::PartialVector { size },
-            ConstructorType::Vector { size, kind, width } => {
-                let ty = self.ensure_type_exists(
-                    crate::TypeInner::Vector { size, kind, width },
-                    octx.reborrow(),
-                );
-                ConcreteConstructor::Type(ty, ctx.module.types[ty].inner.clone())
-            }
-            ConstructorType::PartialMatrix { rows, columns } => {
-                ConcreteConstructor::PartialMatrix { rows, columns }
-            }
-            ConstructorType::Matrix {
-                rows,
-                columns,
-                width,
-            } => {
-                let ty = self.ensure_type_exists(
-                    crate::TypeInner::Matrix {
-                        columns,
-                        rows,
-                        width,
-                    },
-                    octx.reborrow(),
-                );
-                ConcreteConstructor::Type(ty, ctx.module.types[ty].inner.clone())
-            }
-            ConstructorType::PartialArray => ConcreteConstructor::PartialArray,
-            ConstructorType::Array { ref base, size } => {
-                let base = self.resolve_type(base, octx.reborrow())?;
-                let size = match size {
-                    ArraySize::Constant(expr) => {
-                        let span = octx.global_expressions.get_span(expr);
-                        let expr = &octx.global_expressions[expr];
-                        crate::ArraySize::Constant(self.constant(expr, span, octx.reborrow())?)
-                    }
-                    ArraySize::Dynamic => crate::ArraySize::Dynamic,
-                };
-
-                self.layouter
-                    .update(&octx.module.types, &octx.module.constants)
-                    .unwrap();
-                let ty = self.ensure_type_exists(
-                    crate::TypeInner::Array {
-                        base,
-                        size,
-                        stride: self.layouter[base].to_stride(),
-                    },
-                    octx.reborrow(),
-                );
-                ConcreteConstructor::Type(ty, ctx.module.types[ty].inner.clone())
-            }
-            ConstructorType::Type(ty) => {
-                ConcreteConstructor::Type(ty, ctx.module.types[ty].inner.clone())
-            }
-        };
-
-        let components = match *components {
-            [] => Components::None,
-            [component] => {
-                let span = ctx.read_expressions.get_span(component);
-                let component = self.lower_expression(component, ctx.reborrow())?;
-                let ty = ctx.resolve_type(component)?;
-
-                Components::One {
-                    component,
-                    span,
-                    ty,
-                    ty_inner: ctx.module.types[ty].inner.clone(),
-                }
-            }
-            [component, ref rest @ ..] => {
-                let span = ctx.read_expressions.get_span(component);
-                let component = self.lower_expression(component, ctx.reborrow())?;
-                let ty = ctx.resolve_type(component)?;
-
-                Components::Many {
-                    components: std::iter::once(Ok(component))
-                        .chain(
-                            rest.iter()
-                                .map(|&component| self.lower_expression(component, ctx.reborrow())),
-                        )
-                        .collect::<Result<_, _>>()?,
-                    spans: std::iter::once(span)
-                        .chain(
-                            rest.iter()
-                                .map(|&component| ctx.read_expressions.get_span(component)),
-                        )
-                        .collect(),
-                    first_component_ty_inner: ctx.module.types[ty].inner.clone(),
-                }
-            }
-        };
-
-        let expr = match (components, constructor) {
-            // Empty constructor
-            (Components::None, dst_ty) => {
-                let ty = match dst_ty {
-                    ConcreteConstructor::Type(ty, _) => ty,
-                    _ => return Err(Error::TypeNotInferrable(c_span)),
-                };
-
-                return match ctx.create_zero_value_constant(ty) {
-                    Some(constant) => {
-                        Ok(ctx.interrupt_emitter(crate::Expression::Constant(constant), span))
-                    }
-                    None => Err(Error::TypeNotConstructible(c_span)),
-                };
-            }
-
-            // Scalar constructor & conversion (scalar -> scalar)
-            (
-                Components::One {
-                    component,
-                    ty_inner: crate::TypeInner::Scalar { .. },
-                    ..
+        let constant = match self
+            .constant_inner(
+                &ctx.read_expressions[expr],
+                span,
+                OutputContext {
+                    read_expressions: Some(ctx.read_expressions),
+                    globals: ctx.globals,
+                    global_expressions: ctx.global_expressions,
+                    module: ctx.module,
                 },
-                ConcreteConstructor::Type(_, crate::TypeInner::Scalar { kind, width }),
-            ) => crate::Expression::As {
-                expr: component,
-                kind,
-                convert: Some(width),
-            },
-
-            // Vector conversion (vector -> vector)
-            (
-                Components::One {
-                    component,
-                    ty_inner: crate::TypeInner::Vector { size: src_size, .. },
-                    ..
-                },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Vector {
-                        size: dst_size,
-                        kind: dst_kind,
-                        width: dst_width,
-                    },
-                ),
-            ) if dst_size == src_size => crate::Expression::As {
-                expr: component,
-                kind: dst_kind,
-                convert: Some(dst_width),
-            },
-
-            // Vector conversion (vector -> vector) - partial
-            (
-                Components::One {
-                    component,
-                    ty_inner:
-                        crate::TypeInner::Vector {
-                            size: src_size,
-                            kind: src_kind,
-                            ..
-                        },
-                    ..
-                },
-                ConcreteConstructor::PartialVector { size: dst_size },
-            ) if dst_size == src_size => crate::Expression::As {
-                expr: component,
-                kind: src_kind,
-                convert: None,
-            },
-
-            // Matrix conversion (matrix -> matrix)
-            (
-                Components::One {
-                    component,
-                    ty_inner:
-                        crate::TypeInner::Matrix {
-                            columns: src_columns,
-                            rows: src_rows,
-                            ..
-                        },
-                    ..
-                },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Matrix {
-                        columns: dst_columns,
-                        rows: dst_rows,
-                        width: dst_width,
-                    },
-                ),
-            ) if dst_columns == src_columns && dst_rows == src_rows => crate::Expression::As {
-                expr: component,
-                kind: crate::ScalarKind::Float,
-                convert: Some(dst_width),
-            },
-
-            // Matrix conversion (matrix -> matrix) - partial
-            (
-                Components::One {
-                    component,
-                    ty_inner:
-                        crate::TypeInner::Matrix {
-                            columns: src_columns,
-                            rows: src_rows,
-                            ..
-                        },
-                    ..
-                },
-                ConcreteConstructor::PartialMatrix {
-                    columns: dst_columns,
-                    rows: dst_rows,
-                },
-            ) if dst_columns == src_columns && dst_rows == src_rows => crate::Expression::As {
-                expr: component,
-                kind: crate::ScalarKind::Float,
-                convert: None,
-            },
-
-            // Vector constructor (splat) - infer type
-            (
-                Components::One {
-                    component,
-                    ty_inner: crate::TypeInner::Scalar { .. },
-                    ..
-                },
-                ConcreteConstructor::PartialVector { size },
-            ) => crate::Expression::Splat {
-                size,
-                value: component,
-            },
-
-            // Vector constructor (splat)
-            (
-                Components::One {
-                    component,
-                    ty_inner:
-                        crate::TypeInner::Scalar {
-                            kind: src_kind,
-                            width: src_width,
-                            ..
-                        },
-                    ..
-                },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Vector {
-                        size,
-                        kind: dst_kind,
-                        width: dst_width,
-                    },
-                ),
-            ) if dst_kind == src_kind || dst_width == src_width => crate::Expression::Splat {
-                size,
-                value: component,
-            },
-
-            // Vector constructor (by elements)
-            (
-                Components::Many {
-                    components,
-                    first_component_ty_inner:
-                        crate::TypeInner::Scalar { kind, width }
-                        | crate::TypeInner::Vector { kind, width, .. },
-                    ..
-                },
-                ConcreteConstructor::PartialVector { size },
             )
-            | (
-                Components::Many {
-                    components,
-                    first_component_ty_inner:
-                        crate::TypeInner::Scalar { .. } | crate::TypeInner::Vector { .. },
-                    ..
-                },
-                ConcreteConstructor::Type(_, crate::TypeInner::Vector { size, width, kind }),
-            ) => {
-                let inner = crate::TypeInner::Vector { size, kind, width };
-                let ty = ctx.module.types.insert(
-                    crate::Type {
-                        name: Some(inner.to_wgsl(&ctx.module.types, &ctx.module.constants)),
-                        inner,
-                    },
-                    Span::UNDEFINED,
-                );
-                crate::Expression::Compose { ty, components }
-            }
-
-            // Matrix constructor (by elements)
-            (
-                Components::Many {
-                    components,
-                    first_component_ty_inner: crate::TypeInner::Scalar { width, .. },
-                    ..
-                },
-                ConcreteConstructor::PartialMatrix { columns, rows },
-            )
-            | (
-                Components::Many {
-                    components,
-                    first_component_ty_inner: crate::TypeInner::Scalar { .. },
-                    ..
-                },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Matrix {
-                        columns,
-                        rows,
-                        width,
-                    },
-                ),
-            ) => {
-                let inner = crate::TypeInner::Vector {
-                    width,
-                    kind: crate::ScalarKind::Float,
-                    size: rows,
-                };
-                let vec_ty = ctx.module.types.insert(
-                    crate::Type {
-                        name: Some(inner.to_wgsl(&ctx.module.types, &ctx.module.constants)),
-                        inner,
-                    },
-                    Default::default(),
-                );
-
-                let components = components
-                    .chunks(rows as usize)
-                    .map(|vec_components| {
-                        ctx.expressions.append(
-                            crate::Expression::Compose {
-                                ty: vec_ty,
-                                components: Vec::from(vec_components),
-                            },
-                            Default::default(),
-                        )
-                    })
-                    .collect();
-
-                let inner = crate::TypeInner::Matrix {
-                    columns,
-                    rows,
-                    width,
-                };
-                let ty = ctx.module.types.insert(
-                    crate::Type {
-                        name: Some(inner.to_wgsl(&ctx.module.types, &ctx.module.constants)),
-                        inner,
-                    },
-                    Default::default(),
-                );
-                crate::Expression::Compose { ty, components }
-            }
-
-            // Matrix constructor (by columns)
-            (
-                Components::Many {
-                    components,
-                    first_component_ty_inner: crate::TypeInner::Vector { width, .. },
-                    ..
-                },
-                ConcreteConstructor::PartialMatrix { columns, rows },
-            )
-            | (
-                Components::Many {
-                    components,
-                    first_component_ty_inner: crate::TypeInner::Vector { .. },
-                    ..
-                },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Matrix {
-                        columns,
-                        rows,
-                        width,
-                    },
-                ),
-            ) => {
-                let inner = crate::TypeInner::Matrix {
-                    columns,
-                    rows,
-                    width,
-                };
-                let ty = ctx.module.types.insert(
-                    crate::Type {
-                        name: Some(inner.to_wgsl(&ctx.module.types, &ctx.module.constants)),
-                        inner,
-                    },
-                    Default::default(),
-                );
-                crate::Expression::Compose { ty, components }
-            }
-
-            // Array constructor - infer type
-            (components, ConcreteConstructor::PartialArray) => {
-                let components = components.into_components_vec();
-
-                let base = ctx.resolve_type(components[0])?;
-
-                let size = crate::Constant {
-                    name: None,
-                    specialization: None,
-                    inner: crate::ConstantInner::Scalar {
-                        width: 4,
-                        value: crate::ScalarValue::Uint(components.len() as _),
-                    },
-                };
-
-                let inner = crate::TypeInner::Array {
-                    base,
-                    size: crate::ArraySize::Constant(
-                        ctx.module.constants.fetch_or_append(size, Span::UNDEFINED),
-                    ),
-                    stride: {
-                        self.layouter
-                            .update(&ctx.module.types, &ctx.module.constants)
-                            .unwrap();
-                        self.layouter[base].to_stride()
-                    },
-                };
-                let ty = ctx.module.types.insert(
-                    crate::Type {
-                        name: Some(inner.to_wgsl(&ctx.module.types, &ctx.module.constants)),
-                        inner,
-                    },
-                    Span::UNDEFINED,
-                );
-
-                crate::Expression::Compose { ty, components }
-            }
-
-            // Array constructor
-            (components, ConcreteConstructor::Type(ty, crate::TypeInner::Array { .. })) => {
-                let components = components.into_components_vec();
-                crate::Expression::Compose { ty, components }
-            }
-
-            // Struct constructor
-            (components, ConcreteConstructor::Type(ty, crate::TypeInner::Struct { .. })) => {
-                crate::Expression::Compose {
-                    ty,
-                    components: components.into_components_vec(),
-                }
-            }
-
-            // ERRORS
-
-            // Bad conversion (type cast)
-            (
-                Components::One {
-                    span, ty: src_ty, ..
-                },
-                dst_ty,
-            ) => {
-                let from_type = ctx.fmt_ty(src_ty).to_string();
-                return Err(Error::BadTypeCast {
-                    span: span.to_range().unwrap(),
-                    from_type,
-                    to_type: dst_ty.to_error_string(ctx.reborrow()),
-                });
-            }
-
-            // Too many parameters for scalar constructor
-            (
-                Components::Many { spans, .. },
-                ConcreteConstructor::Type(_, crate::TypeInner::Scalar { .. }),
-            ) => {
-                return Err(Error::UnexpectedComponents(super::Span {
-                    start: spans[1].to_range().unwrap().start,
-                    end: spans.last().unwrap().to_range().unwrap().end,
-                }));
-            }
-
-            // Parameters are of the wrong type for vector or matrix constructor
-            (
-                Components::Many { spans, .. },
-                ConcreteConstructor::Type(
-                    _,
-                    crate::TypeInner::Vector { .. } | crate::TypeInner::Matrix { .. },
-                )
-                | ConcreteConstructor::PartialVector { .. }
-                | ConcreteConstructor::PartialMatrix { .. },
-            ) => {
-                return Err(Error::InvalidConstructorComponentType(
-                    spans[0].to_range().unwrap(),
-                    0,
-                ));
-            }
-
-            // Other types can't be constructed
-            _ => return Err(Error::TypeNotConstructible(c_span)),
+            .ok()
+        {
+            Some(ConstantOrInner::Constant(c)) => ctx.module.constants[c].inner.clone(),
+            Some(ConstantOrInner::Inner(inner)) => inner,
+            None => return Ok(None),
         };
-        let expr = ctx.expressions.append(expr, span);
-        Ok(expr)
+
+        let int = match constant {
+            crate::ConstantInner::Scalar {
+                value: crate::ScalarValue::Sint(i),
+                ..
+            } if i >= 0 => i as u64,
+            crate::ConstantInner::Scalar {
+                value: crate::ScalarValue::Uint(i),
+                ..
+            } => i,
+            _ => {
+                return Err(Error::InvalidGatherComponent(span.to_range().unwrap()));
+            }
+        };
+
+        crate::SwizzleComponent::XYZW
+            .get(int as usize)
+            .copied()
+            .map(Some)
+            .ok_or(Error::InvalidGatherComponent(span.to_range().unwrap()))
     }
 
     fn lower_struct(
@@ -2928,9 +2557,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         &mut self,
         expr: &ast::Expression<'source>,
         expr_span: Span,
-        ctx: OutputContext<'source, '_, '_>,
+        mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Constant>, Error<'source>> {
-        let inner = self.constant_inner(expr, expr_span)?;
+        let inner = match self.constant_inner(expr, expr_span, ctx.reborrow())? {
+            ConstantOrInner::Constant(c) => return Ok(c),
+            ConstantOrInner::Inner(inner) => inner,
+        };
+
         let c = ctx.module.constants.fetch_or_append(
             crate::Constant {
                 name: None,
@@ -2946,8 +2579,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         &mut self,
         expr: &ast::Expression<'source>,
         expr_span: Span,
-    ) -> Result<crate::ConstantInner, Error<'source>> {
-        match *expr {
+        mut ctx: OutputContext<'source, '_, '_>,
+    ) -> Result<ConstantOrInner, Error<'source>> {
+        let span = expr_span.to_range().unwrap();
+
+        let inner = match *expr {
             ast::Expression::Literal(literal) => {
                 let inner = match literal {
                     ast::Literal::Number(Number::F32(f)) => crate::ConstantInner::Scalar {
@@ -2971,10 +2607,48 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     },
                 };
 
-                Ok(inner)
+                inner
             }
-            _ => Err(Error::ConstExprUnsupported(expr_span.to_range().unwrap())),
-        }
+            ast::Expression::Ident(ast::IdentExpr::Local(_)) => {
+                return Err(Error::Unexpected(span, ExpectedToken::Constant))
+            }
+            ast::Expression::Ident(ast::IdentExpr::Unresolved(name)) => {
+                return if let Some(global) = ctx.globals.get(name) {
+                    match *global {
+                        GlobalDecl::Const(handle) => Ok(ConstantOrInner::Constant(handle)),
+                        _ => Err(Error::Unexpected(span, ExpectedToken::Constant)),
+                    }
+                } else {
+                    Err(Error::UnknownIdent(span, name))
+                }
+            }
+            ast::Expression::Construct {
+                ref ty,
+                ref components,
+                ..
+            } => self.const_construct(expr_span, ty, components, ctx.reborrow())?,
+            ast::Expression::Call {
+                ref function,
+                ref arguments,
+            } => match ctx.globals.get(function.name) {
+                Some(&GlobalDecl::Type(ty)) => self.const_construct(
+                    expr_span,
+                    &ConstructorType::Type(ty),
+                    arguments,
+                    ctx.reborrow(),
+                )?,
+                Some(_) => return Err(Error::ConstExprUnsupported(span)),
+                None => {
+                    return Err(Error::UnknownIdent(
+                        function.span.clone(),
+                        function.name.clone(),
+                    ))
+                }
+            },
+            _ => return Err(Error::ConstExprUnsupported(span)),
+        };
+
+        Ok(ConstantOrInner::Inner(inner))
     }
 
     fn interpolate_default(
