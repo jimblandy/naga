@@ -1000,25 +1000,25 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let mut emitter = Emitter::default();
                 emitter.start(ctx.expressions);
 
-                let target = self.lower_expression_for_reference(
+                let expr = self.lower_expression_for_reference(
                     target,
                     ctx.as_expression(block, &mut emitter),
                 )?;
                 let mut value =
                     self.lower_expression(value, ctx.as_expression(block, &mut emitter))?;
 
-                if !target.is_reference {
-                    let ty = if ctx.named_expressions.contains_key(&target.handle) {
+                if !expr.is_reference {
+                    let ty = if ctx.named_expressions.contains_key(&expr.handle) {
                         InvalidAssignmentType::ImmutableBinding
                     } else {
-                        match ctx.expressions[target.handle] {
+                        match ctx.expressions[expr.handle] {
                             crate::Expression::Swizzle { .. } => InvalidAssignmentType::Swizzle,
                             _ => InvalidAssignmentType::Other,
                         }
                     };
 
                     return Err(Error::InvalidAssignment {
-                        span: ctx.expressions.get_span(target.handle).to_range().unwrap(),
+                        span: ctx.read_expressions.get_span(target).to_range().unwrap(),
                         ty,
                     });
                 }
@@ -1026,7 +1026,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let value = match op {
                     Some(op) => {
                         let mut ctx = ctx.as_expression(block, &mut emitter);
-                        let mut left = ctx.apply_load_rule(target);
+                        let mut left = ctx.apply_load_rule(expr);
                         ctx.binary_op_splat(op, &mut left, &mut value)?;
                         ctx.expressions.append(
                             crate::Expression::Binary {
@@ -1042,7 +1042,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 block.extend(emitter.finish(ctx.expressions));
 
                 crate::Statement::Store {
-                    pointer: target.handle,
+                    pointer: expr.handle,
                     value,
                 }
             }
@@ -1278,17 +1278,17 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 });
             }
             ast::Expression::Index { base, index } => {
-                let base = self.lower_expression_for_reference(base, ctx.reborrow())?;
+                let expr = self.lower_expression_for_reference(base, ctx.reborrow())?;
                 let index = self.lower_expression(index, ctx.reborrow())?;
 
-                let ty = ctx.resolve_type(base.handle)?;
+                let ty = ctx.resolve_type(expr.handle)?;
                 let wgsl_pointer =
-                    ctx.module.types[ty].inner.pointer_space().is_some() && !base.is_reference;
+                    ctx.module.types[ty].inner.pointer_space().is_some() && !expr.is_reference;
 
                 if wgsl_pointer {
                     return Err(Error::Pointer(
                         "the value indexed by a `[]` subscripting expression",
-                        ctx.expressions.get_span(base.handle).to_range().unwrap(),
+                        ctx.read_expressions.get_span(base).to_range().unwrap(),
                     ));
                 }
 
@@ -1309,18 +1309,18 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     (
                         crate::Expression::AccessIndex {
-                            base: base.handle,
+                            base: expr.handle,
                             index,
                         },
-                        base.is_reference,
+                        expr.is_reference,
                     )
                 } else {
                     (
                         crate::Expression::Access {
-                            base: base.handle,
+                            base: expr.handle,
                             index,
                         },
-                        base.is_reference,
+                        expr.is_reference,
                     )
                 }
             }
@@ -1360,7 +1360,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 if wgsl_pointer {
                     return Err(Error::Pointer(
                         "the value accessed by a `.member` expression",
-                        ctx.expressions.get_span(handle).to_range().unwrap(),
+                        ctx.read_expressions.get_span(base).to_range().unwrap(),
                     ));
                 }
 

@@ -64,12 +64,12 @@ fn invalid_integer() {
 #[test]
 fn invalid_float() {
     check(
-        "let scale: f32 = 1.1.;",
-        r###"error: expected ';', found '.'
-  ┌─ wgsl:1:21
+        "const scale: f32 = 1.1.;",
+        r###"error: expected identifier, found ';'
+  ┌─ wgsl:1:24
   │
-1 │ let scale: f32 = 1.1.;
-  │                     ^ expected ';'
+1 │ const scale: f32 = 1.1.;
+  │                        ^ expected identifier
 
 "###,
     );
@@ -78,12 +78,12 @@ fn invalid_float() {
 #[test]
 fn invalid_texture_sample_type() {
     check(
-        "let x: texture_2d<f16>;",
+        "const x: texture_2d<f16>;",
         r###"error: texture sample type must be one of f32, i32 or u32, but found f16
-  ┌─ wgsl:1:19
+  ┌─ wgsl:1:21
   │
-1 │ let x: texture_2d<f16>;
-  │                   ^^^ must be one of f32, i32 or u32
+1 │ const x: texture_2d<f16>;
+  │                     ^^^ must be one of f32, i32 or u32
 
 "###,
     );
@@ -211,10 +211,10 @@ fn unexpected_constructor_parameters() {
             }
         "#,
         r#"error: unexpected components
-  ┌─ wgsl:3:27
+  ┌─ wgsl:3:28
   │
 3 │                 _ = i32(0, 1);
-  │                           ^^ unexpected components
+  │                            ^ unexpected components
 
 "#,
     );
@@ -365,13 +365,13 @@ fn unknown_ident() {
 fn unknown_scalar_type() {
     check(
         r#"
-            let a: vec2<something>;
+            const a: vec2<something>;
         "#,
         r#"error: unknown scalar type: 'something'
-  ┌─ wgsl:2:25
+  ┌─ wgsl:2:27
   │
-2 │             let a: vec2<something>;
-  │                         ^^^^^^^^^ unknown scalar type
+2 │             const a: vec2<something>;
+  │                           ^^^^^^^^^ unknown scalar type
   │
   = note: Valid scalar types are f16, f32, f64, i8, i16, i32, i64, u8, u16, u32, u64, bool
 
@@ -383,13 +383,13 @@ fn unknown_scalar_type() {
 fn unknown_type() {
     check(
         r#"
-            let a: Vec<f32>;
+            const a: Vec = 10;
         "#,
         r#"error: unknown type: 'Vec'
-  ┌─ wgsl:2:20
+  ┌─ wgsl:2:22
   │
-2 │             let a: Vec<f32>;
-  │                    ^^^ unknown type
+2 │             const a: Vec = 10;
+  │                      ^^^ unknown type
 
 "#,
     );
@@ -399,13 +399,13 @@ fn unknown_type() {
 fn unknown_storage_format() {
     check(
         r#"
-            let storage1: texture_storage_1d<rgba>;
+            const storage1: texture_storage_1d<rgba>;
         "#,
         r#"error: unknown storage format: 'rgba'
-  ┌─ wgsl:2:46
+  ┌─ wgsl:2:48
   │
-2 │             let storage1: texture_storage_1d<rgba>;
-  │                                              ^^^^ unknown storage format
+2 │             const storage1: texture_storage_1d<rgba>;
+  │                                                ^^^^ unknown storage format
 
 "#,
     );
@@ -505,11 +505,11 @@ fn unknown_local_function() {
                 for (a();;) {}
             }
         "#,
-        r#"error: unknown local function `a`
+        r#"error: no definition in scope for identifier: 'a'
   ┌─ wgsl:3:22
   │
 3 │                 for (a();;) {}
-  │                      ^ unknown local function
+  │                      ^ unknown identifier
 
 "#,
     );
@@ -519,13 +519,13 @@ fn unknown_local_function() {
 fn let_type_mismatch() {
     check(
         r#"
-            let x: i32 = 1.0;
+            const x: i32 = 1.0;
         "#,
-        r#"error: the type of `x` is expected to be `f32`
-  ┌─ wgsl:2:17
+        r#"error: the type of `x` is expected to be `i32`, but got `f32`
+  ┌─ wgsl:2:19
   │
-2 │             let x: i32 = 1.0;
-  │                 ^ definition of `x`
+2 │             const x: i32 = 1.0;
+  │                   ^ definition of `x`
 
 "#,
     );
@@ -536,7 +536,7 @@ fn let_type_mismatch() {
                 let x: f32 = true;
             }
         "#,
-        r#"error: the type of `x` is expected to be `bool`
+        r#"error: the type of `x` is expected to be `f32`, but got `bool`
   ┌─ wgsl:3:21
   │
 3 │                 let x: f32 = true;
@@ -550,27 +550,14 @@ fn let_type_mismatch() {
 fn var_type_mismatch() {
     check(
         r#"
-            let x: f32 = 1;
-        "#,
-        r#"error: the type of `x` is expected to be `i32`
-  ┌─ wgsl:2:17
-  │
-2 │             let x: f32 = 1;
-  │                 ^ definition of `x`
-
-"#,
-    );
-
-    check(
-        r#"
             fn foo() {
-                var x: f32 = 1u32;
+                var x: f32 = 1u;
             }
         "#,
-        r#"error: the type of `x` is expected to be `u32`
+        r#"error: the type of `x` is expected to be `f32`, but got `u32`
   ┌─ wgsl:3:21
   │
-3 │                 var x: f32 = 1u32;
+3 │                 var x: f32 = 1u;
   │                     ^ definition of `x`
 
 "#,
@@ -652,16 +639,16 @@ fn reserved_keyword() {
     // global constant
     check(
         r#"
-            let break: bool = true;
+            const break: bool = true;
             fn foo() {
                 var foo = break;
             }
         "#,
         r###"error: name `break` is a reserved keyword
-  ┌─ wgsl:2:17
+  ┌─ wgsl:2:19
   │
-2 │             let break: bool = true;
-  │                 ^^^^^ definition of `break`
+2 │             const break: bool = true;
+  │                   ^^^^^ definition of `break`
 
 "###,
     );
@@ -743,19 +730,19 @@ fn reserved_keyword() {
 
 #[test]
 fn module_scope_identifier_redefinition() {
-    // let
+    // const
     check(
         r#"
-            let foo: bool = true;
-            let foo: bool = true;
+            const foo: bool = true;
+            const foo: bool = true;
         "#,
         r###"error: redefinition of `foo`
-  ┌─ wgsl:2:17
+  ┌─ wgsl:2:19
   │
-2 │             let foo: bool = true;
-  │                 ^^^ previous definition of `foo`
-3 │             let foo: bool = true;
-  │                 ^^^ redefinition of `foo`
+2 │             const foo: bool = true;
+  │                   ^^^ previous definition of `foo`
+3 │             const foo: bool = true;
+  │                   ^^^ redefinition of `foo`
 
 "###,
     );
@@ -780,15 +767,15 @@ fn module_scope_identifier_redefinition() {
     check(
         r#"
             var foo: bool = true;
-            let foo: bool = true;
+            const foo: bool = true;
         "#,
         r###"error: redefinition of `foo`
   ┌─ wgsl:2:17
   │
 2 │             var foo: bool = true;
   │                 ^^^^^^^^^^^^^^^^^ previous definition of `foo: bool = true;`
-3 │             let foo: bool = true;
-  │                 ^^^ redefinition of `foo`
+3 │             const foo: bool = true;
+  │                   ^^^ redefinition of `foo`
 
 "###,
     );
@@ -813,14 +800,14 @@ fn module_scope_identifier_redefinition() {
     // let and function
     check(
         r#"
-            let foo: bool = true;
+            const foo: bool = true;
             fn foo() {}
         "#,
         r###"error: redefinition of `foo`
-  ┌─ wgsl:2:17
+  ┌─ wgsl:2:19
   │
-2 │             let foo: bool = true;
-  │                 ^^^ previous definition of `foo`
+2 │             const foo: bool = true;
+  │                   ^^^ previous definition of `foo`
 3 │             fn foo() {}
   │                ^^^ redefinition of `foo`
 
@@ -937,7 +924,7 @@ fn invalid_arrays() {
     check_validation! {
         "type Bad = array<f32, true>;",
         r#"
-            let length: f32 = 2.718;
+            const length: f32 = 2.718;
             type Bad = array<f32, length>;
         "#:
         Err(naga::valid::ValidationError::Type {
@@ -1628,11 +1615,11 @@ fn binary_statement() {
             3 + 5;
         }
     ",
-        r###"error: expected assignment or increment/decrement, found '3 + 5'
-  ┌─ wgsl:3:13
+        r###"error: expected assignment or increment/decrement, found ';'
+  ┌─ wgsl:3:18
   │
 3 │             3 + 5;
-  │             ^^^^^ expected assignment or increment/decrement
+  │                  ^ expected assignment or increment/decrement
 
 "###,
     );

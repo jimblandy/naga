@@ -20,8 +20,8 @@ struct Light {
     color: vec4<f32>,
 }
 
-let c_ambient: vec3<f32> = vec3<f32>(0.05000000074505806, 0.05000000074505806, 0.05000000074505806);
-let c_max_lights: u32 = 10u;
+const c_ambient: vec3<f32> = vec3<f32>(0.05000000074505806, 0.05000000074505806, 0.05000000074505806);
+const c_max_lights: u32 = 10u;
 
 @group(0) @binding(0) 
 var<uniform> u_globals: Globals;

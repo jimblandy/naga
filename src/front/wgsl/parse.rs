@@ -243,6 +243,7 @@ impl Parser {
         &mut self,
         lexer: &mut Lexer<'a>,
         word: &'a str,
+        span: Span,
         mut ctx: ExpressionContext<'a, '_, '_>,
     ) -> Result<Option<ast::ConstructorType<'a>>, Error<'a>> {
         if let Some((kind, width)) = conv::get_scalar_type(word) {
@@ -296,6 +297,29 @@ impl Parser {
                 rows: crate::VectorSize::Quad,
             },
             "array" => ast::ConstructorType::PartialArray,
+            "atomic"
+            | "binding_array"
+            | "sampler"
+            | "sampler_comparison"
+            | "texture_1d"
+            | "texture_1d_array"
+            | "texture_2d"
+            | "texture_2d_array"
+            | "texture_3d"
+            | "texture_cube"
+            | "texture_cube_array"
+            | "texture_multisampled_2d"
+            | "texture_multisampled_2d_array"
+            | "texture_depth_2d"
+            | "texture_depth_2d_array"
+            | "texture_depth_cube"
+            | "texture_depth_cube_array"
+            | "texture_depth_multisampled_2d"
+            | "texture_storage_1d"
+            | "texture_storage_1d_array"
+            | "texture_storage_2d"
+            | "texture_storage_2d_array"
+            | "texture_storage_3d" => return Err(Error::TypeNotConstructible(span)),
             _ => return Ok(None),
         };
 
@@ -458,7 +482,9 @@ impl Parser {
                 let start = lexer.start_byte_offset();
                 let _ = lexer.next();
 
-                if let Some(ty) = self.parse_constructor_type(lexer, word, ctx.reborrow())? {
+                if let Some(ty) =
+                    self.parse_constructor_type(lexer, word, span.clone(), ctx.reborrow())?
+                {
                     let end = lexer.end_byte_offset();
                     let components = self.parse_arguments(lexer, ctx.reborrow())?;
                     ast::Expression::Construct {

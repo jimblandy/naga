@@ -3,7 +3,7 @@ struct FooStruct {
     v1_: f32,
 }
 
-let Foo_1: bool = true;
+const Foo_1: bool = true;
 
 var<workgroup> wg: array<f32,10u>;
 var<workgroup> at_1: atomic<u32>;
