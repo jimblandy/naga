@@ -16,7 +16,7 @@ impl<'a> Index<'a> {
             let name = ident.name;
             if let Some(old) = globals.insert(name, handle) {
                 return Err(Error::Redefinition {
-                    previous: decl_ident(&tu.decls[old]).span.clone(),
+                    previous: decl_ident(&tu.decls[old]).span,
                     current: ident.span,
                 });
             }

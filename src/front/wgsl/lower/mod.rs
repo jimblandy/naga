@@ -29,7 +29,7 @@ struct OutputContext<'source, 'temp, 'out> {
 impl<'source> OutputContext<'source, '_, '_> {
     fn reborrow(&mut self) -> OutputContext<'source, '_, '_> {
         OutputContext {
-            read_expressions: self.read_expressions.as_deref(),
+            read_expressions: self.read_expressions,
             global_expressions: self.global_expressions,
             globals: self.globals,
             module: self.module,
@@ -355,11 +355,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
 
     /// Format type `ty`.
     fn fmt_ty(&self, ty: Handle<crate::Type>) -> &str {
-        self.module.types[ty]
-            .name
-            .as_ref()
-            .map(|s| &**s)
-            .unwrap_or("unknown")
+        self.module.types[ty].name.as_deref().unwrap_or("unknown")
     }
 }
 
@@ -1077,16 +1073,16 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     } => (kind, width),
                     crate::TypeInner::Pointer { base, .. } => match ectx.module.types[base].inner {
                         crate::TypeInner::Scalar { kind, width } => (kind, width),
-                        _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                        _ => return Err(Error::BadIncrDecrReferenceType(value_span)),
                     },
-                    _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                    _ => return Err(Error::BadIncrDecrReferenceType(value_span)),
                 };
                 let constant_inner = crate::ConstantInner::Scalar {
                     width,
                     value: match kind {
                         crate::ScalarKind::Sint => crate::ScalarValue::Sint(1),
                         crate::ScalarKind::Uint => crate::ScalarValue::Uint(1),
-                        _ => return Err(Error::BadIncrDecrReferenceType(value_span.clone())),
+                        _ => return Err(Error::BadIncrDecrReferenceType(value_span)),
                     },
                 };
                 let constant = ectx.module.constants.append(
@@ -1164,8 +1160,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         width: 4,
                         value: crate::ScalarValue::Uint(u as _),
                     },
-                    ast::Literal::Number(x) => {
-                        panic!("got abstract numeric type when not expected: {:?}", x);
+                    ast::Literal::Number(_) => {
+                        unreachable!("got abstract numeric type when not expected");
                     }
                     ast::Literal::Bool(b) => crate::ConstantInner::Scalar {
                         width: 1,
@@ -1275,7 +1271,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => {
                 let handle = self
                     .call(span, function, arguments, ctx.reborrow())?
-                    .ok_or(Error::FunctionReturnsVoid(function.span.clone()))?;
+                    .ok_or_else(|| Error::FunctionReturnsVoid(function.span.clone()))?;
                 return Ok(TypedExpression {
                     handle,
                     is_reference: false,
@@ -1373,7 +1369,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         let index = members
                             .iter()
                             .position(|m| m.name.as_deref() == Some(field.name))
-                            .ok_or(Error::BadAccessor(field.span.clone()))?
+                            .ok_or_else(|| Error::BadAccessor(field.span.clone()))?
                             as u32;
 
                         (
@@ -1433,9 +1429,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     _ => {
                         let ty = ctx.resolve_type(expr)?;
                         return Err(Error::BadTypeCast {
-                            from_type: format!("{}", ctx.fmt_ty(ty)),
+                            from_type: ctx.fmt_ty(ty).to_string(),
                             span: to.span.clone(),
-                            to_type: format!("{}", ctx.fmt_ty(to_resolved)),
+                            to_type: ctx.fmt_ty(to_resolved).to_string(),
                         });
                     }
                 };
@@ -1684,7 +1680,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 }
                             };
 
-                            let result = ctx.interrupt_emitter(expression, span.clone().into());
+                            let result = ctx.interrupt_emitter(expression, span);
                             ctx.block.push(
                                 crate::Statement::Atomic {
                                     pointer,
@@ -1694,7 +1690,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                     value,
                                     result,
                                 },
-                                span.into(),
+                                span,
                             );
                             return Ok(Some(result));
                         }
@@ -1722,7 +1718,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -1756,7 +1752,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -1805,7 +1801,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -1856,7 +1852,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -1907,7 +1903,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -1959,7 +1955,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -2010,7 +2006,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -2071,7 +2067,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -2120,7 +2116,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.clone().into())?;
+                            let sc = ctx.prepare_sampling(image, image_span.into())?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -2243,12 +2239,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 query: crate::ImageQuery::NumSamples,
                             }
                         }
-                        _ => {
-                            return Err(Error::UnknownIdent(
-                                function.span.clone(),
-                                function.name.clone(),
-                            ))
-                        }
+                        _ => return Err(Error::UnknownIdent(function.span.clone(), function.name)),
                     }
                 };
 
@@ -2314,7 +2305,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
         };
 
-        let result = ctx.interrupt_emitter(expression, span.clone().into());
+        let result = ctx.interrupt_emitter(expression, span);
         ctx.block.push(
             crate::Statement::Atomic {
                 pointer,
@@ -2322,7 +2313,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 value,
                 result,
             },
-            span.into(),
+            span,
         );
         Ok(result)
     }
@@ -2370,7 +2361,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .get(int as usize)
             .copied()
             .map(Some)
-            .ok_or(Error::InvalidGatherComponent(span.to_range().unwrap()))
+            .ok_or_else(|| Error::InvalidGatherComponent(span.to_range().unwrap()))
     }
 
     fn lower_struct(
@@ -2469,11 +2460,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             },
             TypeKind::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
             TypeKind::Pointer { ref base, space } => {
-                let base = self.resolve_type(&base, ctx.reborrow())?;
+                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
                 crate::TypeInner::Pointer { base, space }
             }
             TypeKind::Array { ref base, size } => {
-                let base = self.resolve_type(&base, ctx.reborrow())?;
+                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)
                     .unwrap();
@@ -2506,7 +2497,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             },
             TypeKind::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
             TypeKind::BindingArray { ref base, size } => {
-                let base = self.resolve_type(&base, ctx.reborrow())?;
+                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
 
                 crate::TypeInner::BindingArray {
                     base,
@@ -2542,15 +2533,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         ctx: OutputContext<'source, '_, '_>,
     ) -> Handle<crate::Type> {
         let name = inner.to_wgsl(&ctx.module.types, &ctx.module.constants);
-        let ty = ctx.module.types.insert(
+        ctx.module.types.insert(
             crate::Type {
                 inner,
                 name: Some(name),
             },
             Span::UNDEFINED,
-        );
-
-        ty
+        )
     }
 
     fn constant(
@@ -2584,31 +2573,27 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let span = expr_span.to_range().unwrap();
 
         let inner = match *expr {
-            ast::Expression::Literal(literal) => {
-                let inner = match literal {
-                    ast::Literal::Number(Number::F32(f)) => crate::ConstantInner::Scalar {
-                        width: 4,
-                        value: crate::ScalarValue::Float(f as _),
-                    },
-                    ast::Literal::Number(Number::I32(i)) => crate::ConstantInner::Scalar {
-                        width: 4,
-                        value: crate::ScalarValue::Sint(i as _),
-                    },
-                    ast::Literal::Number(Number::U32(u)) => crate::ConstantInner::Scalar {
-                        width: 4,
-                        value: crate::ScalarValue::Uint(u as _),
-                    },
-                    ast::Literal::Number(x) => {
-                        panic!("got abstract numeric type when not expected: {:?}", x);
-                    }
-                    ast::Literal::Bool(b) => crate::ConstantInner::Scalar {
-                        width: 1,
-                        value: crate::ScalarValue::Bool(b),
-                    },
-                };
-
-                inner
-            }
+            ast::Expression::Literal(literal) => match literal {
+                ast::Literal::Number(Number::F32(f)) => crate::ConstantInner::Scalar {
+                    width: 4,
+                    value: crate::ScalarValue::Float(f as _),
+                },
+                ast::Literal::Number(Number::I32(i)) => crate::ConstantInner::Scalar {
+                    width: 4,
+                    value: crate::ScalarValue::Sint(i as _),
+                },
+                ast::Literal::Number(Number::U32(u)) => crate::ConstantInner::Scalar {
+                    width: 4,
+                    value: crate::ScalarValue::Uint(u as _),
+                },
+                ast::Literal::Number(_) => {
+                    unreachable!("got abstract numeric type when not expected");
+                }
+                ast::Literal::Bool(b) => crate::ConstantInner::Scalar {
+                    width: 1,
+                    value: crate::ScalarValue::Bool(b),
+                },
+            },
             ast::Expression::Ident(ast::IdentExpr::Local(_)) => {
                 return Err(Error::Unexpected(span, ExpectedToken::Constant))
             }
@@ -2638,12 +2623,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     ctx.reborrow(),
                 )?,
                 Some(_) => return Err(Error::ConstExprUnsupported(span)),
-                None => {
-                    return Err(Error::UnknownIdent(
-                        function.span.clone(),
-                        function.name.clone(),
-                    ))
-                }
+                None => return Err(Error::UnknownIdent(function.span.clone(), function.name)),
             },
             _ => return Err(Error::ConstExprUnsupported(span)),
         };

@@ -557,21 +557,18 @@ impl<'a> Error<'a> {
                 labels: path
                     .iter()
                     .enumerate()
-                    .flat_map(|(i, (ident, usage))| {
+                    .flat_map(|(i, &(ref ident, ref usage))| {
                         [
                             (ident.clone(), "".into()),
                             (
                                 usage.clone(),
                                 if i == path.len() - 1 {
-                                    format!("ending the cycle").into()
+                                    "ending the cycle".into()
                                 } else {
                                     format!("uses `{}`", &source[ident.clone()]).into()
                                 },
                             ),
                         ]
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
                     })
                     .collect(),
                 notes: vec![],

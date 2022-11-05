@@ -466,17 +466,15 @@ impl Parser {
                         ty_span: start..end,
                         components,
                     }
+                } else if let Token::Paren('(') = lexer.peek().0 {
+                    self.pop_rule_span(lexer);
+                    return self.parse_function_call(lexer, word, span, ctx);
+                } else if word == "bitcast" {
+                    self.pop_rule_span(lexer);
+                    return self.parse_function_call(lexer, word, span, ctx);
                 } else {
-                    if let Token::Paren('(') = lexer.peek().0 {
-                        self.pop_rule_span(lexer);
-                        return self.parse_function_call(lexer, word, span, ctx);
-                    } else if word == "bitcast" {
-                        self.pop_rule_span(lexer);
-                        return self.parse_function_call(lexer, word, span, ctx);
-                    } else {
-                        let ident = self.parse_ident_expr(word, span, ctx.reborrow());
-                        ast::Expression::Ident(ident)
-                    }
+                    let ident = self.parse_ident_expr(word, span, ctx.reborrow());
+                    ast::Expression::Ident(ident)
                 }
             }
             other => return Err(Error::Unexpected(other.1, ExpectedToken::PrimaryExpression)),
