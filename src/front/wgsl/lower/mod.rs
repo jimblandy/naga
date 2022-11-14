@@ -1,15 +1,15 @@
 use crate::front::wgsl::ast::{
     ConstructorType, GlobalDeclKind, TranslationUnit, TypeKind, VarDecl,
 };
-use crate::front::wgsl::errors::{Error, ExpectedToken, InvalidAssignmentType};
 use crate::front::wgsl::index::Index;
 use crate::front::wgsl::number::Number;
 use crate::front::wgsl::{ast, conv};
+use crate::front::wgsl::{Error, ExpectedToken, InvalidAssignmentType};
 use crate::front::{Emitter, Typifier};
 use crate::proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, TypeResolution};
 use crate::{Arena, FastHashMap, Handle, NamedExpressions, Span};
 
-mod construct;
+mod construction;
 
 enum GlobalDecl {
     Function(Handle<crate::Function>),

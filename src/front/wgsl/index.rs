@@ -1,4 +1,4 @@
-use crate::front::wgsl::errors::Error;
+use crate::front::wgsl::Error;
 use crate::front::wgsl::{ast, Span};
 use crate::{FastHashMap, Handle};
 
