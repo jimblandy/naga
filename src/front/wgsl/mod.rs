@@ -695,92 +695,6 @@ impl<'a> Error<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ParseError {
-    message: String,
-    labels: Vec<(Span, Cow<'static, str>)>,
-    notes: Vec<String>,
-}
-
-impl ParseError {
-    pub fn labels(&self) -> impl Iterator<Item = (Span, &str)> + ExactSizeIterator + '_ {
-        self.labels
-            .iter()
-            .map(|&(ref span, ref msg)| (span.clone(), msg.as_ref()))
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    fn diagnostic(&self) -> Diagnostic<()> {
-        let diagnostic = Diagnostic::error()
-            .with_message(self.message.to_string())
-            .with_labels(
-                self.labels
-                    .iter()
-                    .map(|label| {
-                        Label::primary((), label.0.clone()).with_message(label.1.to_string())
-                    })
-                    .collect(),
-            )
-            .with_notes(
-                self.notes
-                    .iter()
-                    .map(|note| format!("note: {}", note))
-                    .collect(),
-            );
-        diagnostic
-    }
-
-    /// Emits a summary of the error to standard error stream.
-    pub fn emit_to_stderr(&self, source: &str) {
-        self.emit_to_stderr_with_path(source, "wgsl")
-    }
-
-    /// Emits a summary of the error to standard error stream.
-    pub fn emit_to_stderr_with_path(&self, source: &str, path: &str) {
-        let files = SimpleFile::new(path, source);
-        let config = codespan_reporting::term::Config::default();
-        let writer = StandardStream::stderr(ColorChoice::Auto);
-        term::emit(&mut writer.lock(), &config, &files, &self.diagnostic())
-            .expect("cannot write error");
-    }
-
-    /// Emits a summary of the error to a string.
-    pub fn emit_to_string(&self, source: &str) -> String {
-        self.emit_to_string_with_path(source, "wgsl")
-    }
-
-    /// Emits a summary of the error to a string.
-    pub fn emit_to_string_with_path(&self, source: &str, path: &str) -> String {
-        let files = SimpleFile::new(path, source);
-        let config = codespan_reporting::term::Config::default();
-        let mut writer = NoColor::new(Vec::new());
-        term::emit(&mut writer, &config, &files, &self.diagnostic()).expect("cannot write error");
-        String::from_utf8(writer.into_inner()).unwrap()
-    }
-
-    /// Returns a [`SourceLocation`] for the first label in the error message.
-    pub fn location(&self, source: &str) -> Option<SourceLocation> {
-        self.labels
-            .get(0)
-            .map(|label| NagaSpan::new(label.0.start as u32, label.0.end as u32).location(source))
-    }
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for ParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
 impl crate::StorageFormat {
     const fn to_wgsl(self) -> &'static str {
         use crate::StorageFormat as Sf;
@@ -1663,6 +1577,92 @@ struct ParsedVariable<'a> {
     space: Option<crate::AddressSpace>,
     ty: ast::Type<'a>,
     init: Option<Handle<ast::Expression<'a>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ParseError {
+    message: String,
+    labels: Vec<(Span, Cow<'static, str>)>,
+    notes: Vec<String>,
+}
+
+impl ParseError {
+    pub fn labels(&self) -> impl Iterator<Item = (Span, &str)> + ExactSizeIterator + '_ {
+        self.labels
+            .iter()
+            .map(|&(ref span, ref msg)| (span.clone(), msg.as_ref()))
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    fn diagnostic(&self) -> Diagnostic<()> {
+        let diagnostic = Diagnostic::error()
+            .with_message(self.message.to_string())
+            .with_labels(
+                self.labels
+                    .iter()
+                    .map(|label| {
+                        Label::primary((), label.0.clone()).with_message(label.1.to_string())
+                    })
+                    .collect(),
+            )
+            .with_notes(
+                self.notes
+                    .iter()
+                    .map(|note| format!("note: {}", note))
+                    .collect(),
+            );
+        diagnostic
+    }
+
+    /// Emits a summary of the error to standard error stream.
+    pub fn emit_to_stderr(&self, source: &str) {
+        self.emit_to_stderr_with_path(source, "wgsl")
+    }
+
+    /// Emits a summary of the error to standard error stream.
+    pub fn emit_to_stderr_with_path(&self, source: &str, path: &str) {
+        let files = SimpleFile::new(path, source);
+        let config = codespan_reporting::term::Config::default();
+        let writer = StandardStream::stderr(ColorChoice::Auto);
+        term::emit(&mut writer.lock(), &config, &files, &self.diagnostic())
+            .expect("cannot write error");
+    }
+
+    /// Emits a summary of the error to a string.
+    pub fn emit_to_string(&self, source: &str) -> String {
+        self.emit_to_string_with_path(source, "wgsl")
+    }
+
+    /// Emits a summary of the error to a string.
+    pub fn emit_to_string_with_path(&self, source: &str, path: &str) -> String {
+        let files = SimpleFile::new(path, source);
+        let config = codespan_reporting::term::Config::default();
+        let mut writer = NoColor::new(Vec::new());
+        term::emit(&mut writer, &config, &files, &self.diagnostic()).expect("cannot write error");
+        String::from_utf8(writer.into_inner()).unwrap()
+    }
+
+    /// Returns a [`SourceLocation`] for the first label in the error message.
+    pub fn location(&self, source: &str) -> Option<SourceLocation> {
+        self.labels
+            .get(0)
+            .map(|label| NagaSpan::new(label.0.start as u32, label.0.end as u32).location(source))
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
 }
 
 pub struct Parser {

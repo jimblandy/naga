@@ -5,31 +5,6 @@ use crate::front::wgsl::Error;
 use crate::front::wgsl::{ExpressionContext, Lowerer, OutputContext};
 use crate::{Handle, Span};
 
-enum Components {
-    None,
-    One {
-        component: Handle<crate::Expression>,
-        span: Span,
-        ty: Handle<crate::Type>,
-        ty_inner: crate::TypeInner,
-    },
-    Many {
-        components: Vec<Handle<crate::Expression>>,
-        spans: Vec<Span>,
-        first_component_ty_inner: crate::TypeInner,
-    },
-}
-
-impl Components {
-    fn into_components_vec(self) -> Vec<Handle<crate::Expression>> {
-        match self {
-            Components::None => vec![],
-            Components::One { component, .. } => vec![component],
-            Components::Many { components, .. } => components,
-        }
-    }
-}
-
 enum ConcreteConstructor {
     PartialVector {
         size: crate::VectorSize,
@@ -53,6 +28,31 @@ impl ConcreteConstructor {
             }
             ConcreteConstructor::PartialArray => "array<?, ?>".to_string(),
             ConcreteConstructor::Type(ty, _) => ctx.fmt_ty(ty).to_string(),
+        }
+    }
+}
+
+enum Components {
+    None,
+    One {
+        component: Handle<crate::Expression>,
+        span: Span,
+        ty: Handle<crate::Type>,
+        ty_inner: crate::TypeInner,
+    },
+    Many {
+        components: Vec<Handle<crate::Expression>>,
+        spans: Vec<Span>,
+        first_component_ty_inner: crate::TypeInner,
+    },
+}
+
+impl Components {
+    fn into_components_vec(self) -> Vec<Handle<crate::Expression>> {
+        match self {
+            Components::None => vec![],
+            Components::One { component, .. } => vec![component],
+            Components::Many { components, .. } => components,
         }
     }
 }
