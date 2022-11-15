@@ -1,8 +1,8 @@
 use crate::front::wgsl;
 use crate::front::wgsl::ast;
 use crate::front::wgsl::ast::{ArraySize, ConstructorType};
-use crate::front::wgsl::lower::{ExpressionContext, Lowerer, OutputContext};
 use crate::front::wgsl::Error;
+use crate::front::wgsl::{ExpressionContext, Lowerer, OutputContext};
 use crate::{Handle, Span};
 
 enum Components {
