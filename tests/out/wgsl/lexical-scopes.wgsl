@@ -30,8 +30,8 @@ fn forLexicalScope(a_3: f32) {
             break;
         }
         continuing {
-            let _e7 = a_4;
-            a_4 = (_e7 + 1);
+            let _e8 = a_4;
+            a_4 = (_e8 + 1);
         }
     }
     let test_4 = (false == true);

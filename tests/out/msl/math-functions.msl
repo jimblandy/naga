@@ -4,10 +4,8 @@
 
 using metal::uint;
 
-typedef metal::float4 vec4f32_;
 typedef float f32_;
-typedef metal::int2 vec2i32_;
-constant vec2i32_ const_vec2i32_ = {0, 0};
+constant metal::int2 const_type_1_ = {0, 0};
 
 vertex void main_(
 ) {
@@ -17,6 +15,6 @@ vertex void main_(
     metal::float4 c = ((v) * 57.295779513082322865);
     metal::float4 d = ((v) * 0.017453292519943295474);
     metal::float4 e = metal::saturate(v);
-    int const_dot = ( + const_vec2i32_.x * const_vec2i32_.x + const_vec2i32_.y * const_vec2i32_.y);
+    int const_dot = ( + const_type_1_.x * const_type_1_.x + const_type_1_.y * const_type_1_.y);
     uint first_leading_bit_abs = (((metal::clz(metal::abs(0u)) + 1) % 33) - 1);
 }

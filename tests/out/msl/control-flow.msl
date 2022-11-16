@@ -4,12 +4,11 @@
 
 using metal::uint;
 
-typedef metal::uint3 vec3u32_;
 typedef int i32_;
 typedef uint u32_;
 
 void switch_default_break(
-    i32_ i
+    int i
 ) {
     switch(i) {
         default: {
@@ -32,7 +31,7 @@ void switch_case_break(
 }
 
 void loop_switch_continue(
-    i32_ x
+    int x
 ) {
     while(true) {
         switch(x) {
@@ -50,9 +49,9 @@ void loop_switch_continue(
 struct main_Input {
 };
 kernel void main_(
-  vec3u32_ global_id [[thread_position_in_grid]]
+  metal::uint3 global_id [[thread_position_in_grid]]
 ) {
-    i32_ pos = {};
+    int pos = {};
     metal::threadgroup_barrier(metal::mem_flags::mem_device);
     metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup);
     switch(1) {
@@ -61,7 +60,7 @@ kernel void main_(
             break;
         }
     }
-    i32_ _e4 = pos;
+    int _e4 = pos;
     switch(_e4) {
         case 1: {
             pos = 0;
@@ -90,7 +89,7 @@ kernel void main_(
             break;
         }
     }
-    i32_ _e11 = pos;
+    int _e11 = pos;
     switch(_e11) {
         case 1: {
             pos = 0;

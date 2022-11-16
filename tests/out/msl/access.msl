@@ -8,94 +8,88 @@ struct _mslBufferSizes {
     uint size1;
 };
 
-typedef uint u32_;
-typedef metal::uint3 vec3u32_;
-typedef int i32_;
 struct GlobalConst {
-    u32_ a;
+    uint a;
     char _pad1[12];
     metal::packed_uint3 b;
-    i32_ c;
+    int c;
 };
 struct AlignedWrapper {
-    i32_ value;
+    int value;
 };
-typedef metal::float4x3 mat4x3f32_;
-typedef metal::float2x2 mat2x2f32_;
-struct arraymat2x2f322_ {
-    mat2x2f32_ inner[2];
+struct type_5 {
+    metal::float2x2 inner[2];
 };
-typedef metal::atomic_int atomici32_;
-typedef metal::uint2 vec2u32_;
-struct arrayvec2u322_ {
-    vec2u32_ inner[2];
+struct type_8 {
+    metal::uint2 inner[2];
 };
-typedef AlignedWrapper arrayAlignedWrapper[1];
+typedef AlignedWrapper type_9[1];
 struct Bar {
-    mat4x3f32_ _matrix;
-    arraymat2x2f322_ matrix_array;
-    atomici32_ atom;
+    metal::float4x3 _matrix;
+    type_5 matrix_array;
+    metal::atomic_int atom;
     char _pad3[4];
-    arrayvec2u322_ arr;
-    arrayAlignedWrapper data;
+    type_8 arr;
+    type_9 data;
 };
-typedef metal::float3x2 mat3x2f32_;
 struct Baz {
-    mat3x2f32_ m;
+    metal::float3x2 m;
 };
-typedef metal::int2 vec2i32_;
+typedef int i32_;
 typedef thread i32_& ptri32_;
 typedef constant Baz& ptrBaz;
-typedef constant mat3x2f32_& ptrmat3x2f32_;
+typedef constant metal::float3x2& ptrunknown;
 typedef constant metal::float2& ptrf32_;
-typedef metal::float2 vec2f32_;
 typedef float f32_;
+typedef metal::float2 vec2f32_;
+typedef metal::float3x2 mat3x2f32_;
 typedef thread Baz& ptrBaz_1;
-typedef thread mat3x2f32_& ptrmat3x2f32_1;
+typedef thread metal::float3x2& ptrunknown_1;
 typedef thread metal::float2& ptrf32_1;
-typedef metal::float4x2 mat4x2f32_;
-struct arraymat4x2f322_ {
-    mat4x2f32_ inner[2];
+struct type_14 {
+    metal::float4x2 inner[2];
 };
 struct MatCx2InArray {
-    arraymat4x2f322_ am;
+    type_14 am;
 };
 typedef constant MatCx2InArray& ptrMatCx2InArray;
-typedef constant arraymat4x2f322_& ptrarraymat4x2f322_;
-typedef constant mat4x2f32_& ptrmat4x2f32_;
+typedef constant type_14& ptrunknown_2;
+typedef constant metal::float4x2& ptrunknown_3;
 typedef thread MatCx2InArray& ptrMatCx2InArray_1;
-typedef thread arraymat4x2f322_& ptrarraymat4x2f322_1;
-typedef thread mat4x2f32_& ptrmat4x2f32_1;
-typedef thread f32_& ptrf32_2;
-struct arrayf3210_ {
-    f32_ inner[10];
+typedef thread type_14& ptrunknown_4;
+typedef metal::float4x2 mat4x2f32_;
+typedef thread metal::float4x2& ptrunknown_5;
+struct type_17 {
+    float inner[10];
 };
-struct arrayarrayf32105_ {
-    arrayf3210_ inner[5];
+struct type_18 {
+    type_17 inner[5];
 };
-typedef metal::float4 vec4f32_;
 typedef device Bar& ptrBar;
-typedef device mat4x3f32_& ptrmat4x3f32_;
-typedef device metal::float3& ptrf32_3;
-typedef device arrayAlignedWrapper& ptrarrayAlignedWrapper;
+typedef device metal::float4x3& ptrunknown_6;
+typedef device metal::float3& ptrf32_2;
+typedef uint u32_;
+typedef device type_9& ptrunknown_7;
 typedef device AlignedWrapper& ptrAlignedWrapper;
-typedef device i32_& ptri32_1;
-struct arrayi325_ {
-    i32_ inner[5];
+typedef device int& ptrunknown_8;
+struct type_21 {
+    int inner[5];
 };
-typedef thread arrayi325_& ptrarrayi325_;
+typedef thread type_21& ptrunknown_9;
 typedef metal::int4 vec4i32_;
 typedef metal::float3 vec3f32_;
-typedef device atomici32_& ptratomici32_;
-typedef threadgroup u32_& ptru32_;
-constant vec3u32_ const_vec3u32_ = {0u, 0u, 0u};
-constant GlobalConst const_GlobalConst = {0u, {}, const_vec3u32_, 0};
-constant metal::float2 const_type = {0.0, 0.0};
-constant mat4x2f32_ const_mat4x2f32_ = {const_type, const_type, const_type, const_type};
-constant arraymat4x2f322_ const_arraymat4x2f322_ = {const_mat4x2f32_, const_mat4x2f32_};
-constant arrayf3210_ const_arrayf3210_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-constant arrayarrayf32105_ const_arrayarrayf32105_ = {const_arrayf3210_, const_arrayf3210_, const_arrayf3210_, const_arrayf3210_, const_arrayf3210_};
-constant vec2i32_ const_vec2i32_ = {0, 0};
+typedef metal::float4 vec4f32_;
+typedef metal::float4x3 mat4x3f32_;
+typedef metal::uint2 vec2u32_;
+typedef device metal::atomic_int& ptrunknown_10;
+constant metal::uint3 const_type_1_ = {0u, 0u, 0u};
+constant GlobalConst const_GlobalConst = {0u, {}, const_type_1_, 0};
+constant metal::float2 const_type_12_ = {0.0, 0.0};
+constant metal::float4x2 const_type_13_ = {const_type_12_, const_type_12_, const_type_12_, const_type_12_};
+constant type_14 const_type_14_ = {const_type_13_, const_type_13_};
+constant type_17 const_type_17_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+constant type_18 const_type_18_ = {const_type_17_, const_type_17_, const_type_17_, const_type_17_, const_type_17_};
+constant metal::int2 const_type_11_ = {0, 0};
 
 void test_matrix_within_struct_accesses(
     constant Baz& baz
@@ -105,7 +99,7 @@ void test_matrix_within_struct_accesses(
     idx = 1;
     i32_ _e2 = idx;
     idx = _e2 - 1;
-    mat3x2f32_ unnamed = baz.m;
+    metal::float3x2 unnamed = baz.m;
     metal::float2 unnamed_1 = baz.m[0];
     i32_ _e15 = idx;
     metal::float2 unnamed_2 = baz.m[_e15];
@@ -143,8 +137,8 @@ void test_matrix_within_array_within_struct_accesses(
     idx_1 = 1;
     i32_ _e2 = idx_1;
     idx_1 = _e2 - 1;
-    arraymat4x2f322_ unnamed_7 = nested_mat_cx2_.am;
-    mat4x2f32_ unnamed_8 = nested_mat_cx2_.am.inner[0];
+    type_14 unnamed_7 = nested_mat_cx2_.am;
+    metal::float4x2 unnamed_8 = nested_mat_cx2_.am.inner[0];
     metal::float2 unnamed_9 = nested_mat_cx2_.am.inner[0][0];
     i32_ _e24 = idx_1;
     metal::float2 unnamed_10 = nested_mat_cx2_.am.inner[0][_e24];
@@ -156,10 +150,10 @@ void test_matrix_within_array_within_struct_accesses(
     i32_ _e58 = idx_1;
     i32_ _e60 = idx_1;
     float unnamed_14 = nested_mat_cx2_.am.inner[0][_e58][_e60];
-    t_1 = MatCx2InArray {const_arraymat4x2f322_};
+    t_1 = MatCx2InArray {const_type_14_};
     i32_ _e66 = idx_1;
     idx_1 = _e66 + 1;
-    for(int _i=0; _i<2; ++_i) t_1.am.inner[_i] = const_arraymat4x2f322_.inner[_i];
+    for(int _i=0; _i<2; ++_i) t_1.am.inner[_i] = const_type_14_.inner[_i];
     t_1.am.inner[0] = metal::float4x2(metal::float2(8.0), metal::float2(7.0), metal::float2(6.0), metal::float2(5.0));
     t_1.am.inner[0][0] = metal::float2(9.0);
     i32_ _e93 = idx_1;
@@ -175,21 +169,21 @@ void test_matrix_within_array_within_struct_accesses(
     return;
 }
 
-f32_ read_from_private(
-    ptrf32_2 foo_1
+float read_from_private(
+    thread float& foo_1
 ) {
-    f32_ _e1 = foo_1;
+    float _e1 = foo_1;
     return _e1;
 }
 
-f32_ test_arr_as_arg(
-    arrayarrayf32105_ a
+float test_arr_as_arg(
+    type_18 a
 ) {
     return a.inner[4].inner[9];
 }
 
 void assign_through_ptr_fn(
-    ptru32_ p
+    threadgroup uint& p
 ) {
     p = 42u;
     return;
@@ -201,30 +195,30 @@ struct foo_vertOutput {
     metal::float4 member [[position]];
 };
 vertex foo_vertOutput foo_vert(
-  u32_ vi [[vertex_id]]
+  uint vi [[vertex_id]]
 , device Bar const& bar [[buffer(0)]]
 , constant Baz& baz [[buffer(1)]]
-, device vec2i32_ const& qux [[buffer(2)]]
+, device metal::int2 const& qux [[buffer(2)]]
 , constant MatCx2InArray& nested_mat_cx2_ [[buffer(3)]]
 , constant _mslBufferSizes& _buffer_sizes [[buffer(24)]]
 ) {
-    f32_ foo = {};
-    arrayi325_ c2_ = {};
+    float foo = {};
+    type_21 c2_ = {};
     foo = 0.0;
-    f32_ baz_1 = foo;
+    float baz_1 = foo;
     foo = 1.0;
     test_matrix_within_struct_accesses(baz);
     test_matrix_within_array_within_struct_accesses(nested_mat_cx2_);
-    mat4x3f32_ _matrix = bar._matrix;
-    arrayvec2u322_ arr = bar.arr;
+    metal::float4x3 _matrix = bar._matrix;
+    type_8 arr = bar.arr;
     float b = bar._matrix[3].x;
-    i32_ a_1 = bar.data[(1 + (_buffer_sizes.size1 - 120 - 8) / 8) - 2u].value;
-    vec2i32_ c = qux;
-    f32_ _e34 = read_from_private(foo);
-    for(int _i=0; _i<5; ++_i) c2_.inner[_i] = arrayi325_ {a_1, static_cast<int>(b), 3, 4, 5}.inner[_i];
+    int a_1 = bar.data[(1 + (_buffer_sizes.size1 - 120 - 8) / 8) - 2u].value;
+    metal::int2 c = qux;
+    float _e34 = read_from_private(foo);
+    for(int _i=0; _i<5; ++_i) c2_.inner[_i] = type_21 {a_1, static_cast<int>(b), 3, 4, 5}.inner[_i];
     c2_.inner[vi + 1u] = 42;
-    i32_ value = c2_.inner[vi];
-    f32_ _e48 = test_arr_as_arg(const_arrayarrayf32105_);
+    int value = c2_.inner[vi];
+    float _e48 = test_arr_as_arg(const_type_18_);
     return foo_vertOutput { metal::float4(_matrix * static_cast<metal::float4>(metal::int4(value)), 2.0) };
 }
 
@@ -234,14 +228,14 @@ struct foo_fragOutput {
 };
 fragment foo_fragOutput foo_frag(
   device Bar& bar [[buffer(0)]]
-, device vec2i32_& qux [[buffer(2)]]
+, device metal::int2& qux [[buffer(2)]]
 , constant _mslBufferSizes& _buffer_sizes [[buffer(24)]]
 ) {
     bar._matrix[1].z = 1.0;
     bar._matrix = metal::float4x3(metal::float3(0.0), metal::float3(1.0), metal::float3(2.0), metal::float3(3.0));
-    for(int _i=0; _i<2; ++_i) bar.arr.inner[_i] = arrayvec2u322_ {metal::uint2(0u), metal::uint2(1u)}.inner[_i];
+    for(int _i=0; _i<2; ++_i) bar.arr.inner[_i] = type_8 {metal::uint2(0u), metal::uint2(1u)}.inner[_i];
     bar.data[1].value = 1;
-    qux = const_vec2i32_;
+    qux = const_type_11_;
     return foo_fragOutput { metal::float4(0.0) };
 }
 
@@ -250,7 +244,7 @@ kernel void atomics(
   device Bar& bar [[buffer(0)]]
 , constant _mslBufferSizes& _buffer_sizes [[buffer(24)]]
 ) {
-    i32_ tmp = {};
+    int tmp = {};
     int value_1 = metal::atomic_load_explicit(&bar.atom, metal::memory_order_relaxed);
     int _e7 = metal::atomic_fetch_add_explicit(&bar.atom, 5, metal::memory_order_relaxed);
     tmp = _e7;
@@ -274,7 +268,7 @@ kernel void atomics(
 
 
 kernel void assign_through_ptr(
-  threadgroup u32_& val
+  threadgroup uint& val
 ) {
     assign_through_ptr_fn(val);
     return;

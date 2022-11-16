@@ -356,7 +356,7 @@
                     ),
                     ref_count: 2,
                     assignable_global: None,
-                    ty: Handle(4),
+                    ty: Handle(5),
                 ),
                 (
                     uniformity: (

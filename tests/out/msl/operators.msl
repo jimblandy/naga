@@ -4,80 +4,73 @@
 
 using metal::uint;
 
-typedef metal::float4 vec4f32_;
-typedef metal::int4 vec4i32_;
-typedef metal::bool4 vec4bool;
 typedef bool bool_;
-typedef float f32_;
+typedef metal::bool4 vec4bool;
 typedef int i32_;
+typedef metal::int4 vec4i32_;
+typedef metal::float4 vec4f32_;
+typedef float f32_;
 typedef metal::float2 vec2f32_;
-typedef metal::float3 vec3f32_;
 typedef metal::bool3 vec3bool;
 struct Foo {
-    vec4f32_ a;
-    i32_ b;
+    metal::float4 a;
+    int b;
 };
 typedef metal::float2x2 mat2x2f32_;
 typedef metal::float4x4 mat4x4f32_;
-typedef uint u32_;
-typedef metal::uint2 vec2u32_;
-struct arrayFoo3_ {
+struct type_13 {
     Foo inner[3];
 };
+typedef uint u32_;
 struct arrayi324_ {
     i32_ inner[4u];
 };
-typedef metal::float2x3 mat2x3f32_;
 typedef thread Foo& ptrFoo;
-typedef thread vec4f32_& ptrvec4f32_;
+typedef thread metal::float4& ptrunknown;
 typedef metal::int2 vec2i32_;
 typedef metal::uint3 vec3u32_;
-typedef metal::float3x3 mat3x3f32_;
-typedef metal::float4x3 mat4x3f32_;
-typedef metal::float3x4 mat3x4f32_;
+typedef metal::uint2 vec2u32_;
 typedef thread i32_& ptri32_;
-typedef metal::int3 vec3i32_;
-typedef thread vec3i32_& ptrvec3i32_;
+typedef thread metal::int3& ptrunknown_1;
 typedef thread int& ptri32_1;
-constant vec4f32_ v_f32_one = {1.0, 1.0, 1.0, 1.0};
-constant vec4f32_ v_f32_zero = {0.0, 0.0, 0.0, 0.0};
-constant vec4f32_ v_f32_half = {0.5, 0.5, 0.5, 0.5};
-constant vec4i32_ v_i32_one = {1, 1, 1, 1};
-constant vec2u32_ const_vec2u32_ = {0u, 0u};
-constant metal::float2 const_type_1_ = {0.0, 0.0};
-constant mat2x2f32_ const_mat2x2f32_ = {const_type_1_, const_type_1_};
-constant vec4f32_ const_vec4f32_ = {0.0, 0.0, 0.0, 0.0};
-constant Foo const_Foo = {const_vec4f32_, 0};
-constant arrayFoo3_ const_arrayFoo3_ = {const_Foo, const_Foo, const_Foo};
-constant metal::float3 const_type_3_ = {0.0, 0.0, 0.0};
-constant mat2x3f32_ const_mat2x3f32_ = {const_type_3_, const_type_3_};
-constant mat3x3f32_ const_mat3x3f32_ = {const_type_3_, const_type_3_, const_type_3_};
-constant mat4x3f32_ const_mat4x3f32_ = {const_type_3_, const_type_3_, const_type_3_, const_type_3_};
-constant metal::float4 const_type_4_ = {0.0, 0.0, 0.0, 0.0};
-constant mat3x4f32_ const_mat3x4f32_ = {const_type_4_, const_type_4_, const_type_4_};
-constant vec3i32_ const_vec3i32_ = {0, 0, 0};
+constant metal::float4 v_f32_one = {1.0, 1.0, 1.0, 1.0};
+constant metal::float4 v_f32_zero = {0.0, 0.0, 0.0, 0.0};
+constant metal::float4 v_f32_half = {0.5, 0.5, 0.5, 0.5};
+constant metal::int4 v_i32_one = {1, 1, 1, 1};
+constant metal::uint2 const_type_12_ = {0u, 0u};
+constant metal::float2 const_type_4_ = {0.0, 0.0};
+constant metal::float2x2 const_type_8_ = {const_type_4_, const_type_4_};
+constant metal::float4 const_type = {0.0, 0.0, 0.0, 0.0};
+constant Foo const_Foo = {const_type, 0};
+constant type_13 const_type_13_ = {const_Foo, const_Foo, const_Foo};
+constant metal::float3 const_type_5_ = {0.0, 0.0, 0.0};
+constant metal::float2x3 const_type_14_ = {const_type_5_, const_type_5_};
+constant metal::float3x3 const_type_15_ = {const_type_5_, const_type_5_, const_type_5_};
+constant metal::float4x3 const_type_16_ = {const_type_5_, const_type_5_, const_type_5_, const_type_5_};
+constant metal::float3x4 const_type_17_ = {const_type, const_type, const_type};
+constant metal::int3 const_type_18_ = {0, 0, 0};
 
-vec4f32_ builtins(
+metal::float4 builtins(
 ) {
     int s1_ = true ? 1 : 0;
-    vec4f32_ s2_ = true ? v_f32_one : v_f32_zero;
-    vec4f32_ s3_ = metal::select(v_f32_one, v_f32_zero, metal::bool4(false, false, false, false));
-    vec4f32_ m1_ = metal::mix(v_f32_zero, v_f32_one, v_f32_half);
-    vec4f32_ m2_ = metal::mix(v_f32_zero, v_f32_one, 0.10000000149011612);
+    metal::float4 s2_ = true ? v_f32_one : v_f32_zero;
+    metal::float4 s3_ = metal::select(v_f32_one, v_f32_zero, metal::bool4(false, false, false, false));
+    metal::float4 m1_ = metal::mix(v_f32_zero, v_f32_one, v_f32_half);
+    metal::float4 m2_ = metal::mix(v_f32_zero, v_f32_one, 0.10000000149011612);
     float b1_ = as_type<float>(v_i32_one.x);
     metal::float4 b2_ = as_type<metal::float4>(v_i32_one);
     metal::int4 v_i32_zero = static_cast<metal::int4>(v_f32_zero);
     return ((((static_cast<metal::float4>(metal::int4(s1_) + v_i32_zero) + s2_) + m1_) + m2_) + metal::float4(b1_)) + b2_;
 }
 
-vec4f32_ splat(
+metal::float4 splat(
 ) {
     metal::float2 a_2 = ((metal::float2(1.0) + metal::float2(2.0)) - metal::float2(3.0)) / metal::float2(4.0);
     metal::int4 b = metal::int4(5) % metal::int4(2);
     return a_2.xyxy + static_cast<metal::float4>(b);
 }
 
-vec2f32_ splat_assignment(
+metal::float2 splat_assignment(
 ) {
     vec2f32_ a = {};
     a = metal::float2(2.0);
@@ -91,14 +84,14 @@ vec2f32_ splat_assignment(
     return _e15;
 }
 
-vec3f32_ bool_cast(
-    vec3f32_ x
+metal::float3 bool_cast(
+    metal::float3 x
 ) {
     metal::bool3 y = static_cast<metal::bool3>(x);
     return static_cast<metal::float3>(y);
 }
 
-f32_ constructors(
+float constructors(
 ) {
     Foo foo = {};
     foo = Foo {metal::float4(1.0), 1};
@@ -111,10 +104,10 @@ f32_ constructors(
     int unnamed_4 = static_cast<int>(0);
     uint unnamed_5 = static_cast<uint>(0u);
     float unnamed_6 = static_cast<float>(0.0);
-    metal::uint2 unnamed_7 = static_cast<metal::uint2>(const_vec2u32_);
-    metal::float2x3 unnamed_8 = metal::float2x3(const_mat2x3f32_);
-    metal::uint2 unnamed_9 = as_type<metal::uint2>(const_vec2u32_);
-    metal::float2x3 unnamed_10 = metal::float2x3(const_mat2x3f32_);
+    metal::uint2 unnamed_7 = static_cast<metal::uint2>(const_type_12_);
+    metal::float2x3 unnamed_8 = metal::float2x3(const_type_14_);
+    metal::uint2 unnamed_9 = as_type<metal::uint2>(const_type_12_);
+    metal::float2x3 unnamed_10 = metal::float2x3(const_type_14_);
     float _e71 = foo.a.x;
     return _e71;
 }
@@ -195,13 +188,13 @@ void arithmetic(
     metal::uint2 unnamed_78 = metal::uint2(2u) % metal::uint2(1u);
     metal::float2 unnamed_79 = metal::fmod(metal::float2(2.0), metal::float2(1.0));
     metal::float2 unnamed_80 = metal::fmod(metal::float2(2.0), metal::float2(1.0));
-    mat3x3f32_ unnamed_81 = const_mat3x3f32_ + const_mat3x3f32_;
-    mat3x3f32_ unnamed_82 = const_mat3x3f32_ - const_mat3x3f32_;
-    mat3x3f32_ unnamed_83 = const_mat3x3f32_ * 1.0;
-    mat3x3f32_ unnamed_84 = 2.0 * const_mat3x3f32_;
-    metal::float3 unnamed_85 = const_mat4x3f32_ * metal::float4(1.0);
-    metal::float4 unnamed_86 = metal::float3(2.0) * const_mat4x3f32_;
-    metal::float3x3 unnamed_87 = const_mat4x3f32_ * const_mat3x4f32_;
+    metal::float3x3 unnamed_81 = const_type_15_ + const_type_15_;
+    metal::float3x3 unnamed_82 = const_type_15_ - const_type_15_;
+    metal::float3x3 unnamed_83 = const_type_15_ * 1.0;
+    metal::float3x3 unnamed_84 = 2.0 * const_type_15_;
+    metal::float3 unnamed_85 = const_type_16_ * metal::float4(1.0);
+    metal::float4 unnamed_86 = metal::float3(2.0) * const_type_16_;
+    metal::float3x3 unnamed_87 = const_type_16_ * const_type_17_;
 }
 
 void bit(
@@ -275,7 +268,7 @@ void comparison(
 void assignment(
 ) {
     i32_ a_1 = {};
-    vec3i32_ vec0_ = {};
+    metal::int3 vec0_ = {};
     a_1 = 1;
     i32_ _e3 = a_1;
     a_1 = _e3 + 1;
@@ -303,7 +296,7 @@ void assignment(
     a_1 = _e32 + 1;
     i32_ _e35 = a_1;
     a_1 = _e35 - 1;
-    vec0_ = const_vec3i32_;
+    vec0_ = const_type_18_;
     int _e42 = vec0_.y;
     vec0_.y = _e42 + 1;
     int _e47 = vec0_.y;
@@ -313,10 +306,10 @@ void assignment(
 
 kernel void main_(
 ) {
-    vec4f32_ _e0 = builtins();
-    vec4f32_ _e1 = splat();
-    vec3f32_ _e4 = bool_cast(v_f32_one.xyz);
-    f32_ _e5 = constructors();
+    metal::float4 _e0 = builtins();
+    metal::float4 _e1 = splat();
+    metal::float3 _e4 = bool_cast(v_f32_one.xyz);
+    float _e5 = constructors();
     logical();
     arithmetic();
     bit();

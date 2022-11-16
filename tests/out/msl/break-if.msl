@@ -21,15 +21,15 @@ void breakIfEmpty(
 }
 
 void breakIfEmptyBody(
-    bool_ a
+    bool a
 ) {
-    bool_ b = {};
+    bool b = {};
     bool_ c = {};
     bool loop_init_1 = true;
     while(true) {
         if (!loop_init_1) {
             b = a;
-            bool_ _e2 = b;
+            bool _e2 = b;
             c = a != _e2;
             bool_ _e5 = c;
             bool unnamed = a == _e5;
@@ -43,9 +43,9 @@ void breakIfEmptyBody(
 }
 
 void breakIf(
-    bool_ a_1
+    bool a_1
 ) {
-    bool_ d = {};
+    bool d = {};
     bool_ e = {};
     bool loop_init_2 = true;
     while(true) {
@@ -58,7 +58,7 @@ void breakIf(
         }
         loop_init_2 = false;
         d = a_1;
-        bool_ _e2 = d;
+        bool _e2 = d;
         e = a_1 != _e2;
     }
     return;

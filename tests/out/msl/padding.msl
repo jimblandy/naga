@@ -4,28 +4,25 @@
 
 using metal::uint;
 
-typedef metal::float3 vec3f32_;
 struct S {
-    vec3f32_ a;
+    metal::float3 a;
 };
-typedef float f32_;
 struct Test {
     S a;
-    f32_ b;
+    float b;
 };
-struct arrayvec3f322_ {
-    vec3f32_ inner[2];
+struct type_2 {
+    metal::float3 inner[2];
 };
 struct Test2_ {
-    arrayvec3f322_ a;
-    f32_ b;
+    type_2 a;
+    float b;
 };
-typedef metal::float4x3 mat4x3f32_;
 struct Test3_ {
-    mat4x3f32_ a;
-    f32_ b;
+    metal::float4x3 a;
+    float b;
 };
-typedef metal::float4 vec4f32_;
+typedef float f32_;
 typedef constant Test& ptrTest;
 typedef constant Test2_& ptrTest2_;
 typedef constant Test3_& ptrTest3_;
@@ -38,8 +35,8 @@ vertex vertex_Output vertex_(
 , constant Test2_& input2_ [[buffer(1)]]
 , constant Test3_& input3_ [[buffer(2)]]
 ) {
-    f32_ _e4 = input1_.b;
-    f32_ _e8 = input2_.b;
-    f32_ _e12 = input3_.b;
+    float _e4 = input1_.b;
+    float _e8 = input2_.b;
+    float _e12 = input3_.b;
     return vertex_Output { ((metal::float4(1.0) * _e4) * _e8) * _e12 };
 }

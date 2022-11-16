@@ -1,14 +1,14 @@
 (
     types: [
         (
-            name: Some("u32"),
+            name: None,
             inner: Scalar(
                 kind: Uint,
                 width: 4,
             ),
         ),
         (
-            name: Some("array<u32>"),
+            name: None,
             inner: Array(
                 base: 1,
                 size: Dynamic,
@@ -30,7 +30,14 @@
             ),
         ),
         (
-            name: Some("vec3<u32>"),
+            name: Some("u32"),
+            inner: Scalar(
+                kind: Uint,
+                width: 4,
+            ),
+        ),
+        (
+            name: None,
             inner: Vector(
                 size: Tri,
                 kind: Uint,
@@ -49,7 +56,7 @@
             ),
         ),
         (
-            name: Some("ptr<array<u32>>"),
+            name: Some("ptr<unknown>"),
             inner: Pointer(
                 base: 2,
                 space: Storage(
@@ -311,7 +318,7 @@
                 arguments: [
                     (
                         name: Some("global_id"),
-                        ty: 4,
+                        ty: 5,
                         binding: Some(BuiltIn(GlobalInvocationId)),
                     ),
                 ],

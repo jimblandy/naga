@@ -27,7 +27,7 @@ impl ConcreteConstructor {
                 format!("mat{}x{}<?>", columns as u32, rows as u32,)
             }
             ConcreteConstructor::PartialArray => "array<?, ?>".to_string(),
-            ConcreteConstructor::Type(ty, _) => ctx.fmt_ty(ty).to_string(),
+            ConcreteConstructor::Type(ty, _) => ctx.fmt_ty(ty),
         }
     }
 }
@@ -463,7 +463,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 },
                 dst_ty,
             ) => {
-                let from_type = ctx.fmt_ty(src_ty).to_string();
+                let from_type = ctx.fmt_ty(src_ty);
                 return Err(Error::BadTypeCast {
                     span: span.to_range().unwrap(),
                     from_type,

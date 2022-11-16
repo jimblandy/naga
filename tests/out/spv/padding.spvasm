@@ -7,22 +7,18 @@ OpCapability Shader
 OpMemoryModel Logical GLSL450
 OpEntryPoint Vertex %30 "vertex" %28
 OpSource GLSL 450
-OpName %7 "vec3<f32>"
 OpMemberName %8 0 "a"
 OpName %8 "S"
-OpName %6 "f32"
 OpMemberName %9 0 "a"
 OpMemberName %9 1 "b"
 OpName %9 "Test"
-OpName %10 "array<vec3<f32>, 2>"
 OpMemberName %11 0 "a"
 OpMemberName %11 1 "b"
 OpName %11 "Test2"
-OpName %12 "mat4x3<f32>"
 OpMemberName %13 0 "a"
 OpMemberName %13 1 "b"
 OpName %13 "Test3"
-OpName %14 "vec4<f32>"
+OpName %6 "f32"
 OpName %15 "ptr<Test>"
 OpName %16 "ptr<Test2>"
 OpName %17 "ptr<Test3>"

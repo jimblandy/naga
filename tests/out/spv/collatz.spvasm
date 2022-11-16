@@ -9,13 +9,11 @@ OpMemoryModel Logical GLSL450
 OpEntryPoint GLCompute %51 "main" %48
 OpExecutionMode %51 LocalSize 1 1 1
 OpSource GLSL 450
-OpName %4 "u32"
-OpName %8 "array<u32>"
 OpMemberName %9 0 "data"
 OpName %9 "PrimeIndices"
-OpName %10 "vec3<u32>"
+OpName %4 "u32"
 OpName %11 "ptr<PrimeIndices>"
-OpName %12 "ptr<array<u32>>"
+OpName %12 "ptr<unknown>"
 OpName %13 "v_indices"
 OpName %14 "n"
 OpName %17 "i"

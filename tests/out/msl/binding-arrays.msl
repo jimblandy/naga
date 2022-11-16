@@ -10,22 +10,21 @@ struct DefaultConstructible {
         return T {};
     }
 };
-typedef uint u32_;
 struct UniformIndex {
-    u32_ index;
+    uint index;
 };
 struct FragmentIn {
-    u32_ index;
+    uint index;
 };
-typedef metal::float4 vec4f32_;
 typedef constant UniformIndex& ptrUniformIndex;
 typedef int i32_;
 typedef metal::int2 vec2i32_;
 typedef float f32_;
+typedef metal::float4 vec4f32_;
 typedef metal::float2 vec2f32_;
 
 struct main_Input {
-    u32_ index [[user(loc0), flat]];
+    uint index [[user(loc0), flat]];
 };
 struct main_Output {
     metal::float4 member [[color(0)]];
@@ -47,8 +46,8 @@ fragment main_Output main_(
     vec2i32_ i2_ = {};
     f32_ v1_ = {};
     vec4f32_ v4_ = {};
-    u32_ uniform_index = uni.index;
-    u32_ non_uniform_index = fragment_in.index;
+    uint uniform_index = uni.index;
+    uint non_uniform_index = fragment_in.index;
     i1_ = 0;
     i2_ = metal::int2(0);
     v1_ = 0.0;

@@ -4150,8 +4150,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         {
                             return Err(Error::InitializationTypeMismatch(
                                 l.name.span.clone(),
-                                ctx.fmt_ty(ty).to_string(),
-                                ctx.fmt_ty(init_ty).to_string(),
+                                ctx.fmt_ty(ty),
+                                ctx.fmt_ty(init_ty),
                             ));
                         }
                     }
@@ -4210,8 +4210,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             {
                                 return Err(Error::InitializationTypeMismatch(
                                     v.name.span.clone(),
-                                    ctx.fmt_ty(explicit).to_string(),
-                                    ctx.fmt_ty(inferred).to_string(),
+                                    ctx.fmt_ty(explicit),
+                                    ctx.fmt_ty(inferred),
                                 ));
                             }
                             explicit
@@ -4801,9 +4801,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     _ => {
                         let ty = ctx.resolve_type(expr)?;
                         return Err(Error::BadTypeCast {
-                            from_type: ctx.fmt_ty(ty).to_string(),
+                            from_type: ctx.fmt_ty(ty),
                             span: to.span.clone(),
-                            to_type: ctx.fmt_ty(to_resolved).to_string(),
+                            to_type: ctx.fmt_ty(to_resolved),
                         });
                     }
                 };

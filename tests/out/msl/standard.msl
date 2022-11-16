@@ -4,7 +4,6 @@
 
 using metal::uint;
 
-typedef metal::float4 vec4f32_;
 
 struct derivativesInput {
 };
@@ -12,10 +11,10 @@ struct derivativesOutput {
     metal::float4 member [[color(0)]];
 };
 fragment derivativesOutput derivatives(
-  vec4f32_ foo [[position]]
+  metal::float4 foo [[position]]
 ) {
-    vec4f32_ x = metal::dfdx(foo);
-    vec4f32_ y = metal::dfdy(foo);
-    vec4f32_ z = metal::fwidth(foo);
+    metal::float4 x = metal::dfdx(foo);
+    metal::float4 y = metal::dfdy(foo);
+    metal::float4 z = metal::fwidth(foo);
     return derivativesOutput { (x + y) * z };
 }
