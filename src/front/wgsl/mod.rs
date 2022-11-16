@@ -3950,14 +3950,20 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     if let Some(explicit) = explicit_ty {
                         if explicit != inferred_type {
+                            let ty = &ctx.module.types[explicit];
+                            let explicit = ty.name.clone().unwrap_or_else(|| {
+                                ty.inner.to_wgsl(&ctx.module.types, &ctx.module.constants)
+                            });
+
+                            let ty = &ctx.module.types[inferred_type];
+                            let inferred = ty.name.clone().unwrap_or_else(|| {
+                                ty.inner.to_wgsl(&ctx.module.types, &ctx.module.constants)
+                            });
+
                             return Err(Error::InitializationTypeMismatch(
                                 c.name.span.clone(),
-                                ctx.module.types[explicit].name.as_ref().unwrap().clone(),
-                                ctx.module.types[inferred_type]
-                                    .name
-                                    .as_ref()
-                                    .unwrap()
-                                    .clone(),
+                                explicit,
+                                inferred,
                             ));
                         }
                     }
