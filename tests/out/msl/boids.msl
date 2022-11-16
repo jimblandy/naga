@@ -27,18 +27,6 @@ typedef Particle type_3[1];
 struct Particles {
     type_3 particles;
 };
-typedef uint u32_;
-typedef device Particles& ptrParticles;
-typedef device type_3& ptrunknown;
-typedef device Particle& ptrParticle;
-typedef float f32_;
-typedef metal::float2 vec2f32_;
-typedef int i32_;
-typedef constant SimParams& ptrSimParams;
-typedef thread metal::float2& ptrunknown_1;
-typedef device Particles& ptrParticles_1;
-typedef device type_3& ptrunknown_2;
-typedef device Particle& ptrParticle_1;
 
 struct main_Input {
 };
@@ -51,9 +39,9 @@ kernel void main_(
 ) {
     metal::float2 vPos = {};
     metal::float2 vVel = {};
-    vec2f32_ cMass = {};
-    vec2f32_ cVel = {};
-    vec2f32_ colVel = {};
+    metal::float2 cMass = {};
+    metal::float2 cVel = {};
+    metal::float2 colVel = {};
     int cMassCount = {};
     int cVelCount = {};
     metal::float2 pos = {};
@@ -98,7 +86,7 @@ kernel void main_(
         metal::float2 _e54 = vPos;
         float _e58 = params.rule1Distance;
         if (metal::distance(_e53, _e54) < _e58) {
-            vec2f32_ _e60 = cMass;
+            metal::float2 _e60 = cMass;
             metal::float2 _e61 = pos;
             cMass = _e60 + _e61;
             int _e63 = cMassCount;
@@ -108,7 +96,7 @@ kernel void main_(
         metal::float2 _e67 = vPos;
         float _e71 = params.rule2Distance;
         if (metal::distance(_e66, _e67) < _e71) {
-            vec2f32_ _e73 = colVel;
+            metal::float2 _e73 = colVel;
             metal::float2 _e74 = pos;
             metal::float2 _e75 = vPos;
             colVel = _e73 - (_e74 - _e75);
@@ -117,7 +105,7 @@ kernel void main_(
         metal::float2 _e79 = vPos;
         float _e83 = params.rule3Distance;
         if (metal::distance(_e78, _e79) < _e83) {
-            vec2f32_ _e85 = cVel;
+            metal::float2 _e85 = cVel;
             metal::float2 _e86 = vel;
             cVel = _e85 + _e86;
             int _e88 = cVelCount;
@@ -126,23 +114,23 @@ kernel void main_(
     }
     int _e94 = cMassCount;
     if (_e94 > 0) {
-        vec2f32_ _e97 = cMass;
+        metal::float2 _e97 = cMass;
         int _e98 = cMassCount;
         metal::float2 _e102 = vPos;
         cMass = (_e97 / metal::float2(static_cast<float>(_e98))) - _e102;
     }
     int _e104 = cVelCount;
     if (_e104 > 0) {
-        vec2f32_ _e107 = cVel;
+        metal::float2 _e107 = cVel;
         int _e108 = cVelCount;
         cVel = _e107 / metal::float2(static_cast<float>(_e108));
     }
     metal::float2 _e112 = vVel;
-    vec2f32_ _e113 = cMass;
+    metal::float2 _e113 = cMass;
     float _e116 = params.rule1Scale;
-    vec2f32_ _e119 = colVel;
+    metal::float2 _e119 = colVel;
     float _e122 = params.rule2Scale;
-    vec2f32_ _e125 = cVel;
+    metal::float2 _e125 = cVel;
     float _e128 = params.rule3Scale;
     vVel = ((_e112 + (_e113 * _e116)) + (_e119 * _e122)) + (_e125 * _e128);
     metal::float2 _e131 = vVel;

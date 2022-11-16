@@ -4,15 +4,6 @@
 
 using metal::uint;
 
-typedef metal::uint2 vec2u32_;
-typedef int i32_;
-typedef metal::int2 vec2i32_;
-typedef uint u32_;
-typedef metal::uint4 vec4u32_;
-typedef float f32_;
-typedef metal::int3 vec3i32_;
-typedef metal::float2 vec2f32_;
-typedef metal::float4 vec4f32_;
 constant metal::int2 const_type_9_ = {3, 1};
 
 struct main_Input {

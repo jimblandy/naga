@@ -32,26 +32,8 @@ struct type_14 {
 struct type_15 {
     type_14 inner[2];
 };
-typedef device FooStruct& ptrFooStruct;
-typedef float f32_;
-typedef int i32_;
-typedef device metal::float3& ptrunknown;
-typedef threadgroup type_2& ptrunknown_1;
-typedef constant type_15& ptrunknown_2;
-typedef constant type_14& ptrunknown_3;
-typedef constant type_12& ptrunknown_4;
-typedef constant type_11& ptrunknown_5;
-typedef constant metal::float2x4& ptrunknown_6;
-typedef metal::float2 vec2f32_;
-typedef device type_6& ptrunknown_7;
-typedef device metal::float2& ptrunknown_8;
-typedef constant type_8& ptrunknown_9;
-typedef constant metal::float4& ptrunknown_10;
-typedef uint u32_;
-typedef threadgroup metal::atomic_uint& ptrunknown_11;
-typedef bool bool_;
 constant metal::float3 const_type_4_ = {0.0, 0.0, 0.0};
-constant metal::float3x3 const_type_16_ = {const_type_4_, const_type_4_, const_type_4_};
+constant metal::float3x3 const_type_19_ = {const_type_4_, const_type_4_, const_type_4_};
 
 void test_msl_packed_vec3_as_arg(
     metal::float3 arg
@@ -62,19 +44,19 @@ void test_msl_packed_vec3_as_arg(
 void test_msl_packed_vec3_(
     device FooStruct& alignment
 ) {
-    i32_ idx = {};
+    int idx = {};
     alignment.v3_ = metal::float3(1.0);
     idx = 1;
     alignment.v3_[0] = 1.0;
     alignment.v3_[0] = 2.0;
-    i32_ _e17 = idx;
+    int _e17 = idx;
     alignment.v3_[_e17] = 3.0;
     FooStruct data = alignment;
     metal::float3 unnamed = data.v3_;
     metal::float2 unnamed_1 = metal::float3(data.v3_).zx;
     test_msl_packed_vec3_as_arg(data.v3_);
-    metal::float3 unnamed_2 = metal::float3(data.v3_) * const_type_16_;
-    metal::float3 unnamed_3 = const_type_16_ * metal::float3(data.v3_);
+    metal::float3 unnamed_2 = metal::float3(data.v3_) * const_type_19_;
+    metal::float3 unnamed_3 = const_type_19_ * metal::float3(data.v3_);
     metal::float3 unnamed_4 = data.v3_ * 2.0;
     metal::float3 unnamed_5 = 2.0 * data.v3_;
 }

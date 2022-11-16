@@ -30,13 +30,6 @@
             ),
         ),
         (
-            name: Some("u32"),
-            inner: Scalar(
-                kind: Uint,
-                width: 4,
-            ),
-        ),
-        (
             name: None,
             inner: Vector(
                 size: Tri,
@@ -45,7 +38,7 @@
             ),
         ),
         (
-            name: Some("ptr<PrimeIndices>"),
+            name: None,
             inner: Pointer(
                 base: 3,
                 space: Storage(
@@ -56,7 +49,7 @@
             ),
         ),
         (
-            name: Some("ptr<unknown>"),
+            name: None,
             inner: Pointer(
                 base: 2,
                 space: Storage(
@@ -318,7 +311,7 @@
                 arguments: [
                     (
                         name: Some("global_id"),
-                        ty: 5,
+                        ty: 4,
                         binding: Some(BuiltIn(GlobalInvocationId)),
                     ),
                 ],

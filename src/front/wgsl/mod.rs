@@ -25,9 +25,7 @@ use crate::front::{Emitter, Typifier};
 use crate::{
     arena::Handle,
     front::SymbolTable,
-    proc::{
-        ensure_block_returns, Alignment, Layouter, ResolveContext, ResolveError, TypeResolution,
-    },
+    proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, ResolveError},
     Arena, FastHashMap, FastHashSet, NamedExpressions, SourceLocation, Span as NagaSpan,
     UniqueArena,
 };
@@ -1041,6 +1039,12 @@ impl<'source> OutputContext<'source, '_, '_> {
             module: self.module,
         }
     }
+
+    fn ensure_type_exists(&mut self, inner: crate::TypeInner) -> Handle<crate::Type> {
+        self.module
+            .types
+            .insert(crate::Type { inner, name: None }, NagaSpan::UNDEFINED)
+    }
 }
 
 struct StatementContext<'source, 'temp, 'out> {
@@ -1146,23 +1150,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         };
         match self.typifier.grow(handle, self.expressions, &resolve_ctx) {
             Err(e) => Err(Error::InvalidResolve(e)),
-            Ok(()) => {
-                let res = &self.typifier[handle];
-                match *res {
-                    TypeResolution::Handle(handle) => Ok(handle),
-                    TypeResolution::Value(ref inner) => {
-                        let name = inner.to_wgsl(&self.module.types, &self.module.constants);
-                        let handle = self.module.types.insert(
-                            crate::Type {
-                                name: Some(name),
-                                inner: inner.clone(),
-                            },
-                            NagaSpan::UNDEFINED,
-                        );
-                        Ok(handle)
-                    }
-                }
-            }
+            Ok(()) => Ok(self.typifier.get_handle(handle, &mut self.module.types)),
         }
     }
 
@@ -1365,6 +1353,16 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         ty.name
             .clone()
             .unwrap_or_else(|| ty.inner.to_wgsl(&self.module.types, &self.module.constants))
+    }
+
+    fn ensure_type_exists(&mut self, inner: crate::TypeInner) -> Handle<crate::Type> {
+        OutputContext {
+            read_expressions: None,
+            global_expressions: self.global_expressions,
+            globals: self.globals,
+            module: self.module,
+        }
+        .ensure_type_exists(inner)
     }
 }
 
@@ -3924,13 +3922,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     };
 
                     let inferred_type = match inner {
-                        crate::ConstantInner::Scalar { width, value } => self.ensure_type_exists(
-                            crate::TypeInner::Scalar {
+                        crate::ConstantInner::Scalar { width, value } => {
+                            ctx.ensure_type_exists(crate::TypeInner::Scalar {
                                 width,
                                 kind: value.scalar_kind(),
-                            },
-                            ctx.reborrow(),
-                        ),
+                            })
+                        }
                         crate::ConstantInner::Composite { ty, .. } => ty,
                     };
 
@@ -5896,17 +5893,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
         };
 
-        Ok(self.ensure_type_exists(inner, ctx))
-    }
-
-    fn ensure_type_exists(
-        &mut self,
-        inner: crate::TypeInner,
-        ctx: OutputContext<'source, '_, '_>,
-    ) -> Handle<crate::Type> {
-        ctx.module
-            .types
-            .insert(crate::Type { inner, name: None }, NagaSpan::UNDEFINED)
+        Ok(ctx.ensure_type_exists(inner))
     }
 
     fn constant(

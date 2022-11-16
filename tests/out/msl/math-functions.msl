@@ -4,8 +4,7 @@
 
 using metal::uint;
 
-typedef float f32_;
-constant metal::int2 const_type_1_ = {0, 0};
+constant metal::int2 const_type_2_ = {0, 0};
 
 vertex void main_(
 ) {
@@ -15,6 +14,6 @@ vertex void main_(
     metal::float4 c = ((v) * 57.295779513082322865);
     metal::float4 d = ((v) * 0.017453292519943295474);
     metal::float4 e = metal::saturate(v);
-    int const_dot = ( + const_type_1_.x * const_type_1_.x + const_type_1_.y * const_type_1_.y);
+    int const_dot = ( + const_type_2_.x * const_type_2_.x + const_type_2_.y * const_type_2_.y);
     uint first_leading_bit_abs = (((metal::clz(metal::abs(0u)) + 1) % 33) - 1);
 }

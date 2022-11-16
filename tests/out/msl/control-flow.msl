@@ -4,8 +4,6 @@
 
 using metal::uint;
 
-typedef int i32_;
-typedef uint u32_;
 
 void switch_default_break(
     int i

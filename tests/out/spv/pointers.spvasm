@@ -8,12 +8,8 @@ OpExtension "SPV_KHR_storage_buffer_storage_class"
 %1 = OpExtInstImport "GLSL.std.450"
 OpMemoryModel Logical GLSL450
 OpSource GLSL 450
-OpName %6 "ptr<unknown>"
-OpName %7 "ptr<i32>"
 OpMemberName %10 0 "arr"
 OpName %10 "DynamicArray"
-OpName %11 "ptr<DynamicArray>"
-OpName %12 "ptr<unknown>"
 OpName %13 "dynamic_array"
 OpName %14 "v"
 OpName %17 "f"

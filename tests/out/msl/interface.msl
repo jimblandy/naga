@@ -8,18 +8,14 @@ struct VertexOutput {
     metal::float4 position;
     float _varying;
 };
-typedef float f32_;
-typedef metal::float4 vec4f32_;
 struct FragmentOutput {
     float depth;
     uint sample_mask;
     float color;
 };
-typedef uint u32_;
 struct type_4 {
     uint inner[1];
 };
-typedef threadgroup type_4& ptrunknown;
 struct Input1_ {
     uint index;
 };
@@ -97,8 +93,8 @@ vertex vertex_two_structsOutput vertex_two_structs(
 ) {
     const Input1_ in1_ = { index_1 };
     const Input2_ in2_ = { index_2 };
-    u32_ index = {};
+    uint index = {};
     index = 2u;
-    u32_ _e8 = index;
+    uint _e8 = index;
     return vertex_two_structsOutput { metal::float4(static_cast<float>(in1_.index), static_cast<float>(in2_.index), static_cast<float>(_e8), 0.0), 1.0 };
 }

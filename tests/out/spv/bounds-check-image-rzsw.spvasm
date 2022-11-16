@@ -11,8 +11,6 @@ OpMemoryModel Logical GLSL450
 OpEntryPoint Fragment %252 "fragment_shader" %250
 OpExecutionMode %252 OriginUpperLeft
 OpSource GLSL 450
-OpName %6 "f32"
-OpName %8 "vec4<f32>"
 OpName %25 "image_1d"
 OpName %27 "image_2d"
 OpName %29 "image_2d_array"

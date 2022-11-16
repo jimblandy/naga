@@ -25,13 +25,6 @@ struct Globals {
     metal::float3x4 m;
     type_4 d;
 };
-typedef device Globals& ptrGlobals;
-typedef device type_1& ptrunknown;
-typedef device type_4& ptrunknown_1;
-typedef device metal::float4& ptrunknown_2;
-typedef device metal::float3x4& ptrunknown_3;
-typedef device metal::float4& ptrf32_;
-typedef float f32_;
 
 float index_array(
     int i,

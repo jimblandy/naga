@@ -9,8 +9,6 @@ struct VertexOutput {
     metal::float2 uv;
     metal::float4 position;
 };
-typedef metal::float4 vec4f32_;
-typedef float f32_;
 
 struct vert_mainInput {
     metal::float2 pos [[attribute(0)]];

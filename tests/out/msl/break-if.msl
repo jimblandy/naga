@@ -4,7 +4,6 @@
 
 using metal::uint;
 
-typedef bool bool_;
 
 void breakIfEmpty(
 ) {
@@ -24,14 +23,14 @@ void breakIfEmptyBody(
     bool a
 ) {
     bool b = {};
-    bool_ c = {};
+    bool c = {};
     bool loop_init_1 = true;
     while(true) {
         if (!loop_init_1) {
             b = a;
             bool _e2 = b;
             c = a != _e2;
-            bool_ _e5 = c;
+            bool _e5 = c;
             bool unnamed = a == _e5;
             if (a == c) {
                 break;
@@ -46,11 +45,11 @@ void breakIf(
     bool a_1
 ) {
     bool d = {};
-    bool_ e = {};
+    bool e = {};
     bool loop_init_2 = true;
     while(true) {
         if (!loop_init_2) {
-            bool_ _e5 = e;
+            bool _e5 = e;
             bool unnamed_1 = a_1 == _e5;
             if (a_1 == e) {
                 break;

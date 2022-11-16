@@ -4,16 +4,12 @@
 
 using metal::uint;
 
-typedef float f32_;
-typedef metal::float2 vec2f32_;
-typedef int i32_;
-typedef uint u32_;
 
 metal::float2 test_fma(
 ) {
-    vec2f32_ a = metal::float2(2.0, 2.0);
-    vec2f32_ b = metal::float2(0.5, 0.5);
-    vec2f32_ c = metal::float2(0.5, 0.5);
+    metal::float2 a = metal::float2(2.0, 2.0);
+    metal::float2 b = metal::float2(0.5, 0.5);
+    metal::float2 c = metal::float2(0.5, 0.5);
     return metal::fma(a, b, c);
 }
 

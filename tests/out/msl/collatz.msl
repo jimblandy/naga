@@ -12,9 +12,6 @@ typedef uint type_1[1];
 struct PrimeIndices {
     type_1 data;
 };
-typedef uint u32_;
-typedef device PrimeIndices& ptrPrimeIndices;
-typedef device type_1& ptrunknown;
 
 uint collatz_iterations(
     uint n_base

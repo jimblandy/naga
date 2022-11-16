@@ -22,10 +22,6 @@ struct Test3_ {
     metal::float4x3 a;
     float b;
 };
-typedef float f32_;
-typedef constant Test& ptrTest;
-typedef constant Test2_& ptrTest2_;
-typedef constant Test3_& ptrTest3_;
 
 struct vertex_Output {
     metal::float4 member [[position]];

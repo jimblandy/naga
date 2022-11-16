@@ -4,8 +4,6 @@
 
 using metal::uint;
 
-typedef float f32_;
-typedef metal::float2 vec2f32_;
 
 metal::float4 test(
     metal::texture2d<float, metal::access::sample> Passed_Texture,

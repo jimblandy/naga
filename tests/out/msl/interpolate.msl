@@ -14,11 +14,6 @@ struct FragmentInput {
     float perspective_centroid;
     float perspective_sample;
 };
-typedef thread FragmentInput& ptrFragmentInput;
-typedef float f32_;
-typedef metal::float4 vec4f32_;
-typedef metal::float2 vec2f32_;
-typedef metal::float3 vec3f32_;
 
 struct vert_mainOutput {
     metal::float4 position [[position]];

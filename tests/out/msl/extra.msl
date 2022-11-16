@@ -13,10 +13,6 @@ struct FragmentIn {
     metal::float4 color;
     uint primitive_index;
 };
-typedef constant PushConstants& ptrPushConstants;
-typedef float f32_;
-typedef metal::float3 vec3f32_;
-typedef metal::float4 vec4f32_;
 
 struct main_Input {
     metal::float4 color [[user(loc0), center_perspective]];

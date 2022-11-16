@@ -4,8 +4,6 @@
 
 using metal::uint;
 
-typedef float f32_;
-typedef metal::float4 vec4f32_;
 constant metal::int2 const_type_4_ = {0, 0};
 constant metal::int3 const_type_7_ = {0, 0, 0};
 constant metal::float4 const_type_2_ = {0.0, 0.0, 0.0, 0.0};

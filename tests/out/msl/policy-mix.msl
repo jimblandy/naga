@@ -31,15 +31,6 @@ struct type_6 {
 struct type_9 {
     metal::float4 inner[2];
 };
-typedef float f32_;
-typedef metal::float4 vec4f32_;
-typedef device InStorage& ptrInStorage;
-typedef device type_1& ptrunknown;
-typedef constant InUniform& ptrInUniform;
-typedef constant type_2& ptrunknown_1;
-typedef threadgroup type_5& ptrunknown_2;
-typedef thread type_6& ptrunknown_3;
-typedef thread type_9& ptrunknown_4;
 
 metal::float4 mock_function(
     metal::int2 c,

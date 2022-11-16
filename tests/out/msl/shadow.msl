@@ -22,29 +22,15 @@ struct VertexOutput {
     metal::float3 world_normal;
     metal::float4 world_position;
 };
-typedef constant Entity& ptrEntity;
-typedef thread VertexOutput& ptrVertexOutput;
-typedef metal::float4 vec4f32_;
-typedef metal::float3 vec3f32_;
-typedef metal::float3x3 mat3x3f32_;
-typedef metal::int3 vec3i32_;
-typedef constant Globals& ptrGlobals;
 struct Light {
     metal::float4x4 proj;
     metal::float4 pos;
     metal::float4 color;
 };
-typedef Light type_6[1];
-struct type_7 {
+typedef Light type_10[1];
+struct type_11 {
     Light inner[10];
 };
-typedef float f32_;
-typedef metal::float2 vec2f32_;
-typedef uint u32_;
-typedef constant metal::uint4& ptrunknown;
-typedef device type_6& ptrunknown_1;
-typedef thread u32_& ptru32_;
-typedef constant type_7& ptrunknown_2;
 constant metal::float3 c_ambient = {0.05000000074505806, 0.05000000074505806, 0.05000000074505806};
 
 float fetch_shadow(
@@ -56,7 +42,7 @@ float fetch_shadow(
     if (homogeneous_coords.w <= 0.0) {
         return 1.0;
     }
-    vec2f32_ flip_correction = metal::float2(0.5, -0.5);
+    metal::float2 flip_correction = metal::float2(0.5, -0.5);
     float proj_correction = 1.0 / homogeneous_coords.w;
     metal::float2 light_local = ((homogeneous_coords.xy * flip_correction) * proj_correction) + metal::float2(0.5, 0.5);
     float _e24 = t_shadow.sample_compare(sampler_shadow, light_local, static_cast<int>(light_id), homogeneous_coords.z * proj_correction);
@@ -105,33 +91,33 @@ fragment fs_mainOutput fs_main(
 , metal::float4 proj_position [[position]]
 , constant Globals& u_globals [[user(fake0)]]
 , constant Entity& u_entity [[user(fake0)]]
-, device type_6 const& s_lights [[user(fake0)]]
+, device type_10 const& s_lights [[user(fake0)]]
 , metal::depth2d_array<float, metal::access::sample> t_shadow [[user(fake0)]]
 , metal::sampler sampler_shadow [[user(fake0)]]
 , constant _mslBufferSizes& _buffer_sizes [[user(fake0)]]
 ) {
     const VertexOutput in = { proj_position, varyings_1.world_normal, varyings_1.world_position };
     metal::float3 color = {};
-    u32_ i = {};
+    uint i = {};
     metal::float3 normal_1 = metal::normalize(in.world_normal);
     color = c_ambient;
     i = 0u;
     bool loop_init = true;
     while(true) {
         if (!loop_init) {
-            u32_ _e39 = i;
+            uint _e39 = i;
             i = _e39 + 1u;
         }
         loop_init = false;
-        u32_ _e7 = i;
+        uint _e7 = i;
         uint _e11 = u_globals.num_lights.x;
         if (_e7 < metal::min(_e11, c_max_lights)) {
         } else {
             break;
         }
-        u32_ _e16 = i;
+        uint _e16 = i;
         Light light = s_lights[_e16];
-        u32_ _e19 = i;
+        uint _e19 = i;
         float _e23 = fetch_shadow(_e19, light.proj * in.world_position, t_shadow, sampler_shadow);
         metal::float3 light_dir = metal::normalize(light.pos.xyz - in.world_position.xyz);
         float diffuse = metal::max(0.0, metal::dot(normal_1, light_dir));
@@ -156,32 +142,32 @@ fragment fs_main_without_storageOutput fs_main_without_storage(
 , metal::float4 proj_position_1 [[position]]
 , constant Globals& u_globals [[user(fake0)]]
 , constant Entity& u_entity [[user(fake0)]]
-, constant type_7& u_lights [[user(fake0)]]
+, constant type_11& u_lights [[user(fake0)]]
 , metal::depth2d_array<float, metal::access::sample> t_shadow [[user(fake0)]]
 , metal::sampler sampler_shadow [[user(fake0)]]
 ) {
     const VertexOutput in_1 = { proj_position_1, varyings_2.world_normal, varyings_2.world_position };
     metal::float3 color_1 = {};
-    u32_ i_1 = {};
+    uint i_1 = {};
     metal::float3 normal_2 = metal::normalize(in_1.world_normal);
     color_1 = c_ambient;
     i_1 = 0u;
     bool loop_init_1 = true;
     while(true) {
         if (!loop_init_1) {
-            u32_ _e39 = i_1;
+            uint _e39 = i_1;
             i_1 = _e39 + 1u;
         }
         loop_init_1 = false;
-        u32_ _e7 = i_1;
+        uint _e7 = i_1;
         uint _e11 = u_globals.num_lights.x;
         if (_e7 < metal::min(_e11, c_max_lights)) {
         } else {
             break;
         }
-        u32_ _e16 = i_1;
+        uint _e16 = i_1;
         Light light_1 = u_lights.inner[_e16];
-        u32_ _e19 = i_1;
+        uint _e19 = i_1;
         float _e23 = fetch_shadow(_e19, light_1.proj * in_1.world_position, t_shadow, sampler_shadow);
         metal::float3 light_dir_1 = metal::normalize(light_1.pos.xyz - in_1.world_position.xyz);
         float diffuse_1 = metal::max(0.0, metal::dot(normal_2, light_dir_1));

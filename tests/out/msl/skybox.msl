@@ -12,14 +12,6 @@ struct Data {
     metal::float4x4 proj_inv;
     metal::float4x4 view;
 };
-typedef int i32_;
-typedef float f32_;
-typedef metal::float4 vec4f32_;
-typedef constant Data& ptrData;
-typedef constant metal::float4x4& ptrunknown;
-typedef constant metal::float4& ptrf32_;
-typedef metal::float3 vec3f32_;
-typedef metal::float3x3 mat3x3f32_;
 
 struct vs_mainInput {
 };
@@ -31,13 +23,13 @@ vertex vs_mainOutput vs_main(
   uint vertex_index [[vertex_id]]
 , constant Data& r_data [[buffer(0)]]
 ) {
-    i32_ tmp1_ = {};
-    i32_ tmp2_ = {};
+    int tmp1_ = {};
+    int tmp2_ = {};
     tmp1_ = static_cast<int>(vertex_index) / 2;
     tmp2_ = static_cast<int>(vertex_index) & 1;
-    i32_ _e9 = tmp1_;
-    i32_ _e15 = tmp2_;
-    vec4f32_ pos = metal::float4((static_cast<float>(_e9) * 4.0) - 1.0, (static_cast<float>(_e15) * 4.0) - 1.0, 0.0, 1.0);
+    int _e9 = tmp1_;
+    int _e15 = tmp2_;
+    metal::float4 pos = metal::float4((static_cast<float>(_e9) * 4.0) - 1.0, (static_cast<float>(_e15) * 4.0) - 1.0, 0.0, 1.0);
     metal::float4 _e27 = r_data.view[0];
     metal::float4 _e32 = r_data.view[1];
     metal::float4 _e37 = r_data.view[2];

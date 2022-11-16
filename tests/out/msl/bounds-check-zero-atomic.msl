@@ -23,11 +23,6 @@ struct Globals {
     type_1 b;
     type_2 c;
 };
-typedef device Globals& ptrGlobals;
-typedef device metal::atomic_uint& ptrunknown;
-typedef uint u32_;
-typedef device type_1& ptrunknown_1;
-typedef device type_2& ptrunknown_2;
 
 uint fetch_add_atomic(
     device Globals& globals,
