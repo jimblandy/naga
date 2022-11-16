@@ -351,7 +351,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 Components::Many {
                     components,
                     first_component_ty_inner:
-                        &crate::TypeInner::Scalar { .. } | crate::TypeInner::Vector { .. },
+                        &crate::TypeInner::Scalar { .. } | &crate::TypeInner::Vector { .. },
                     ..
                 },
                 ConcreteConstructor::Type(_, &crate::TypeInner::Vector { size, width, kind }),
