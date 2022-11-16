@@ -3782,11 +3782,11 @@ impl Parser {
         }
     }
 
-    pub fn parse<'a>(&mut self, source: &'a str) -> Result<TranslationUnit<'a>, ParseError> {
+    pub fn parse(&mut self, source: &str) -> Result<crate::Module, ParseError> {
         self.reset();
 
         let mut lexer = Lexer::new(source);
-        let mut tu = ast::TranslationUnit::default();
+        let mut tu = TranslationUnit::default();
         loop {
             match self.parse_global_decl(&mut lexer, &mut tu) {
                 Err(error) => return Err(error.as_parse_error(lexer.source)),
@@ -3802,7 +3802,12 @@ impl Parser {
             }
         }
 
-        Ok(tu)
+        let index = Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
+        let module = Lowerer::new(&index)
+            .lower(&tu)
+            .map_err(|x| x.as_parse_error(source))?;
+
+        Ok(module)
     }
 }
 
@@ -3819,7 +3824,7 @@ enum ConstantOrInner {
     Inner(crate::ConstantInner),
 }
 
-pub struct Lowerer<'source, 'temp> {
+struct Lowerer<'source, 'temp> {
     index: &'temp Index<'source>,
     layouter: Layouter,
 }
@@ -4238,7 +4243,6 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         None => return Ok(()),
                     }
                 }
-                VarDecl::Const(_) => return Err(Error::ConstExprUnsupported(stmt.span.clone())),
             },
             ast::StatementKind::If {
                 condition,
@@ -5989,9 +5993,5 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 }
 
 pub fn parse_str(source: &str) -> Result<crate::Module, ParseError> {
-    let tu = Parser::new().parse(source)?;
-    let index = Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
-    Lowerer::new(&index)
-        .lower(&tu)
-        .map_err(|x| x.as_parse_error(source))
+    Parser::new().parse(source)
 }

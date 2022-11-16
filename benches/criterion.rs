@@ -42,11 +42,12 @@ fn frontends(c: &mut Criterion) {
     #[cfg(all(feature = "wgsl-in", feature = "serialize", feature = "deserialize"))]
     group.bench_function("bin", |b| {
         let inputs_wgsl = gather_inputs("tests/in", "wgsl");
+        let mut parser = naga::front::wgsl::Parser::new();
         let inputs_bin = inputs_wgsl
             .iter()
             .map(|input| {
                 let string = std::str::from_utf8(input).unwrap();
-                let module = naga::front::wgsl::parse_str(string).unwrap();
+                let module = parser.parse(string).unwrap();
                 bincode::serialize(&module).unwrap()
             })
             .collect::<Vec<_>>();
@@ -63,9 +64,10 @@ fn frontends(c: &mut Criterion) {
             .iter()
             .map(|input| std::str::from_utf8(input).unwrap())
             .collect::<Vec<_>>();
+        let mut parser = naga::front::wgsl::Parser::new();
         b.iter(move || {
             for &input in inputs.iter() {
-                naga::front::wgsl::parse_str(input).unwrap();
+                parser.parse(input).unwrap();
             }
         });
     });
@@ -97,11 +99,12 @@ fn frontends(c: &mut Criterion) {
 #[cfg(feature = "wgsl-in")]
 fn gather_modules() -> Vec<naga::Module> {
     let inputs = gather_inputs("tests/in", "wgsl");
+    let mut parser = naga::front::wgsl::Parser::new();
     inputs
         .iter()
         .map(|input| {
             let string = std::str::from_utf8(input).unwrap();
-            naga::front::wgsl::parse_str(string).unwrap()
+            parser.parse(string).unwrap()
         })
         .collect()
 }

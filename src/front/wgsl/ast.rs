@@ -338,7 +338,6 @@ pub struct Let<'a> {
 #[derive(Debug)]
 pub enum VarDecl<'a> {
     Var(LocalVariable<'a>),
-    Const(Let<'a>),
     Let(Let<'a>),
 }
 
