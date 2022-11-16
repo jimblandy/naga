@@ -204,7 +204,7 @@ pub enum Error<'a> {
 }
 
 impl<'a> Error<'a> {
-    pub fn as_parse_error(&self, source: &'a str) -> ParseError {
+    fn as_parse_error(&self, source: &'a str) -> ParseError {
         match *self {
             Error::Unexpected(ref unexpected_span, expected) => {
                 let expected_str = match expected {
@@ -1273,13 +1273,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
                 crate::ConstantInner::Scalar { width, value }
             }
             crate::TypeInner::Vector { size, kind, width } => {
-                let scalar_ty = self.module.types.insert(
-                    crate::Type {
-                        name: None,
-                        inner: crate::TypeInner::Scalar { width, kind },
-                    },
-                    Default::default(),
-                );
+                let scalar_ty = self.ensure_type_exists(crate::TypeInner::Scalar { width, kind });
                 let component = self.create_zero_value_constant(scalar_ty);
                 crate::ConstantInner::Composite {
                     ty,
@@ -1291,17 +1285,11 @@ impl<'a> ExpressionContext<'a, '_, '_> {
                 rows,
                 width,
             } => {
-                let vec_ty = self.module.types.insert(
-                    crate::Type {
-                        name: None,
-                        inner: crate::TypeInner::Vector {
-                            width,
-                            kind: crate::ScalarKind::Float,
-                            size: rows,
-                        },
-                    },
-                    Default::default(),
-                );
+                let vec_ty = self.ensure_type_exists(crate::TypeInner::Vector {
+                    width,
+                    kind: crate::ScalarKind::Float,
+                    size: rows,
+                });
                 let component = self.create_zero_value_constant(vec_ty);
                 crate::ConstantInner::Composite {
                     ty,

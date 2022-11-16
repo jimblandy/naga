@@ -357,10 +357,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ConcreteConstructor::Type(_, &crate::TypeInner::Vector { size, width, kind }),
             ) => {
                 let inner = crate::TypeInner::Vector { size, kind, width };
-                let ty = ctx
-                    .module
-                    .types
-                    .insert(crate::Type { name: None, inner }, Span::UNDEFINED);
+                let ty = ctx.ensure_type_exists(inner);
                 crate::Expression::Compose { ty, components }
             }
 
@@ -388,12 +385,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     },
                 ),
             ) => {
-                let inner = crate::TypeInner::Vector {
+                let vec_ty = ctx.ensure_type_exists(crate::TypeInner::Vector {
                     width,
                     kind: crate::ScalarKind::Float,
                     size: rows,
-                };
-                let vec_ty = ctx.ensure_type_exists(inner);
+                });
 
                 let components = components
                     .chunks(rows as usize)
@@ -408,12 +404,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     })
                     .collect();
 
-                let inner = crate::TypeInner::Matrix {
+                let ty = ctx.ensure_type_exists(crate::TypeInner::Matrix {
                     columns,
                     rows,
                     width,
-                };
-                let ty = ctx.ensure_type_exists(inner);
+                });
                 crate::Expression::Compose { ty, components }
             }
 
@@ -441,12 +436,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     },
                 ),
             ) => {
-                let inner = crate::TypeInner::Matrix {
+                let ty = ctx.ensure_type_exists(crate::TypeInner::Matrix {
                     columns,
                     rows,
                     width,
-                };
-                let ty = ctx.ensure_type_exists(inner);
+                });
                 crate::Expression::Compose { ty, components }
             }
 
