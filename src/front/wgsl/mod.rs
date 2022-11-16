@@ -1360,8 +1360,11 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     }
 
     /// Format type `ty`.
-    fn fmt_ty(&self, ty: Handle<crate::Type>) -> &str {
-        self.module.types[ty].name.as_deref().unwrap_or("unknown")
+    fn fmt_ty(&self, ty: Handle<crate::Type>) -> String {
+        let ty = &self.module.types[ty];
+        ty.name
+            .clone()
+            .unwrap_or_else(|| ty.inner.to_wgsl(&self.module.types, &self.module.constants))
     }
 }
 
@@ -5895,14 +5898,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         inner: crate::TypeInner,
         ctx: OutputContext<'source, '_, '_>,
     ) -> Handle<crate::Type> {
-        let name = inner.to_wgsl(&ctx.module.types, &ctx.module.constants);
-        ctx.module.types.insert(
-            crate::Type {
-                inner,
-                name: Some(name),
-            },
-            NagaSpan::UNDEFINED,
-        )
+        ctx.module
+            .types
+            .insert(crate::Type { inner, name: None }, NagaSpan::UNDEFINED)
     }
 
     fn constant(
