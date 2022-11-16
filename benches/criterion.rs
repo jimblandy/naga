@@ -63,10 +63,9 @@ fn frontends(c: &mut Criterion) {
             .iter()
             .map(|input| std::str::from_utf8(input).unwrap())
             .collect::<Vec<_>>();
-        let mut parser = naga::front::wgsl::Parser::new();
         b.iter(move || {
             for &input in inputs.iter() {
-                parser.parse(input).unwrap();
+                naga::front::wgsl::parse_str(input).unwrap();
             }
         });
     });
