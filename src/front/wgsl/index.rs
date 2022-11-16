@@ -8,7 +8,7 @@ pub struct Index<'a> {
 
 impl<'a> Index<'a> {
     pub fn generate(tu: &ast::TranslationUnit<'a>) -> Result<Self, Error<'a>> {
-        let mut globals = FastHashMap::default();
+        let mut globals = FastHashMap::with_capacity_and_hasher(tu.decls.len(), Default::default());
 
         // Populate dependencies
         for (handle, decl) in tu.decls.iter() {

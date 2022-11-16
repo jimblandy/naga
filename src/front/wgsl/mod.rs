@@ -3262,12 +3262,16 @@ impl Parser {
                             )?;
                             lexer.expect(Token::Paren(')'))?;
                         }
+
+                        ctx.local_table.push_scope();
+
                         lexer.expect(Token::Paren('{'))?;
 
                         while !lexer.skip(Token::Paren('}')) {
                             self.parse_statement(lexer, ctx.reborrow(), &mut body)?;
                         }
 
+                        ctx.local_table.pop_scope();
                         ctx.local_table.pop_scope();
 
                         ast::StatementKind::Loop {
