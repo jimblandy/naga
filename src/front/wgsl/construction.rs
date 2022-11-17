@@ -1,9 +1,6 @@
-use crate::front::wgsl;
-use crate::front::wgsl::ast;
-use crate::front::wgsl::ast::{ArraySize, ConstructorType};
-use crate::front::wgsl::Error;
-use crate::front::wgsl::{ExpressionContext, Lowerer, OutputContext};
-use crate::{Handle, Span};
+use crate::{Handle, Span as NagaSpan};
+
+use super::{ast, Error, ExpressionContext, Lowerer, OutputContext};
 
 enum ConcreteConstructorHandle {
     PartialVector {
@@ -61,12 +58,12 @@ enum ComponentsHandle {
     None,
     One {
         component: Handle<crate::Expression>,
-        span: Span,
+        span: NagaSpan,
         ty: Handle<crate::Type>,
     },
     Many {
         components: Vec<Handle<crate::Expression>>,
-        spans: Vec<Span>,
+        spans: Vec<NagaSpan>,
         first_component_ty: Handle<crate::Type>,
     },
 }
@@ -102,13 +99,13 @@ enum Components<'a> {
     None,
     One {
         component: Handle<crate::Expression>,
-        span: Span,
+        span: NagaSpan,
         ty: Handle<crate::Type>,
         ty_inner: &'a crate::TypeInner,
     },
     Many {
         components: Vec<Handle<crate::Expression>>,
-        spans: Vec<Span>,
+        spans: Vec<NagaSpan>,
         first_component_ty_inner: &'a crate::TypeInner,
     },
 }
@@ -126,9 +123,9 @@ impl Components<'_> {
 impl<'source, 'temp> Lowerer<'source, 'temp> {
     pub(super) fn construct(
         &mut self,
-        span: Span,
-        constructor: &ConstructorType<'source>,
-        c_span: wgsl::Span,
+        span: NagaSpan,
+        constructor: &ast::ConstructorType<'source>,
+        c_span: super::Span,
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
@@ -462,7 +459,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let inner = crate::TypeInner::Array {
                     base,
                     size: crate::ArraySize::Constant(
-                        ctx.module.constants.fetch_or_append(size, Span::UNDEFINED),
+                        ctx.module
+                            .constants
+                            .fetch_or_append(size, NagaSpan::UNDEFINED),
                     ),
                     stride: {
                         self.layouter
@@ -512,7 +511,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 Components::Many { spans, .. },
                 ConcreteConstructor::Type(_, &crate::TypeInner::Scalar { .. }),
             ) => {
-                return Err(Error::UnexpectedComponents(wgsl::Span {
+                return Err(Error::UnexpectedComponents(super::Span {
                     start: spans[1].to_range().unwrap().start,
                     end: spans.last().unwrap().to_range().unwrap().end,
                 }));
@@ -544,8 +543,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     pub(super) fn const_construct(
         &mut self,
-        span: Span,
-        constructor: &ConstructorType<'source>,
+        span: NagaSpan,
+        constructor: &ast::ConstructorType<'source>,
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<crate::ConstantInner, Error<'source>> {
@@ -575,25 +574,25 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn constructor<'out>(
         &mut self,
-        constructor: &ConstructorType<'source>,
+        constructor: &ast::ConstructorType<'source>,
         mut ctx: OutputContext<'source, '_, 'out>,
     ) -> Result<ConcreteConstructorHandle, Error<'source>> {
         let c = match *constructor {
-            ConstructorType::Scalar { width, kind } => {
+            ast::ConstructorType::Scalar { width, kind } => {
                 let ty = ctx.ensure_type_exists(crate::TypeInner::Scalar { width, kind });
                 ConcreteConstructorHandle::Type(ty)
             }
-            ConstructorType::PartialVector { size } => {
+            ast::ConstructorType::PartialVector { size } => {
                 ConcreteConstructorHandle::PartialVector { size }
             }
-            ConstructorType::Vector { size, kind, width } => {
+            ast::ConstructorType::Vector { size, kind, width } => {
                 let ty = ctx.ensure_type_exists(crate::TypeInner::Vector { size, kind, width });
                 ConcreteConstructorHandle::Type(ty)
             }
-            ConstructorType::PartialMatrix { rows, columns } => {
+            ast::ConstructorType::PartialMatrix { rows, columns } => {
                 ConcreteConstructorHandle::PartialMatrix { rows, columns }
             }
-            ConstructorType::Matrix {
+            ast::ConstructorType::Matrix {
                 rows,
                 columns,
                 width,
@@ -605,16 +604,16 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 });
                 ConcreteConstructorHandle::Type(ty)
             }
-            ConstructorType::PartialArray => ConcreteConstructorHandle::PartialArray,
-            ConstructorType::Array { ref base, size } => {
+            ast::ConstructorType::PartialArray => ConcreteConstructorHandle::PartialArray,
+            ast::ConstructorType::Array { ref base, size } => {
                 let base = self.resolve_type(base, ctx.reborrow())?;
                 let size = match size {
-                    ArraySize::Constant(expr) => {
+                    ast::ArraySize::Constant(expr) => {
                         let span = ctx.global_expressions.get_span(expr);
                         let expr = &ctx.global_expressions[expr];
                         crate::ArraySize::Constant(self.constant(expr, span, ctx.reborrow())?)
                     }
-                    ArraySize::Dynamic => crate::ArraySize::Dynamic,
+                    ast::ArraySize::Dynamic => crate::ArraySize::Dynamic,
                 };
 
                 self.layouter
@@ -627,7 +626,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 });
                 ConcreteConstructorHandle::Type(ty)
             }
-            ConstructorType::Type(ty) => ConcreteConstructorHandle::Type(ty),
+            ast::ConstructorType::Type(ty) => ConcreteConstructorHandle::Type(ty),
         };
 
         Ok(c)

@@ -13,22 +13,15 @@ mod number;
 #[cfg(test)]
 mod tests;
 
-use std::borrow::Cow;
-use std::ops::Range;
-use thiserror::Error;
-
-use self::number::Number;
-use crate::front::wgsl::ast::{
-    ConstructorType, GlobalDeclKind, TranslationUnit, TypeKind, VarDecl,
-};
-use crate::front::{Emitter, Typifier};
 use crate::{
-    arena::Handle,
-    front::SymbolTable,
+    arena::{Arena, Handle, UniqueArena},
     proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, ResolveError},
-    Arena, FastHashMap, FastHashSet, NamedExpressions, SourceLocation, Span as NagaSpan,
-    UniqueArena,
+    span::SourceLocation,
+    span::Span as NagaSpan,
+    FastHashMap, FastHashSet,
 };
+
+use self::{lexer::Lexer, number::Number};
 use codespan_reporting::{
     diagnostic::{Diagnostic, Label},
     files::SimpleFile,
@@ -37,9 +30,8 @@ use codespan_reporting::{
         termcolor::{ColorChoice, NoColor, StandardStream},
     },
 };
-
-use crate::front::wgsl::index::Index;
-use crate::front::wgsl::lexer::Lexer;
+use std::{borrow::Cow, convert::TryFrom, ops::Range};
+use thiserror::Error;
 
 type Span = Range<usize>;
 type TokenSpan<'a> = (Token<'a>, Span);
@@ -76,6 +68,8 @@ pub enum ExpectedToken<'a> {
     Identifier,
     Number(NumberType),
     Integer,
+    /// A compile-time constant expression.
+    Constant,
     /// Expected: constant, parenthesized expression, identifier
     PrimaryExpression,
     /// Expected: assignment, increment/decrement expression
@@ -96,8 +90,6 @@ pub enum ExpectedToken<'a> {
     Variable,
     /// Access of a function
     Function,
-    /// A compile-time constant expression.
-    Constant,
 }
 
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
@@ -208,47 +200,47 @@ impl<'a> Error<'a> {
         match *self {
             Error::Unexpected(ref unexpected_span, expected) => {
                 let expected_str = match expected {
-                    ExpectedToken::Token(token) => {
-                        match token {
-                            Token::Separator(c) => format!("'{}'", c),
-                            Token::Paren(c) => format!("'{}'", c),
-                            Token::Attribute => "@".to_string(),
-                            Token::Number(_) => "number".to_string(),
-                            Token::Word(s) => s.to_string(),
-                            Token::Operation(c) => format!("operation ('{}')", c),
-                            Token::LogicalOperation(c) => format!("logical operation ('{}')", c),
-                            Token::ShiftOperation(c) => format!("bitshift ('{}{}')", c, c),
-                            Token::AssignmentOperation(c) if c=='<' || c=='>' => format!("bitshift ('{}{}=')", c, c),
-                            Token::AssignmentOperation(c) => format!("operation ('{}=')", c),
-                            Token::IncrementOperation => "increment operation".to_string(),
-                            Token::DecrementOperation => "decrement operation".to_string(),
-                            Token::Arrow => "->".to_string(),
-                            Token::Unknown(c) => format!("unknown ('{}')", c),
-                            Token::Trivia => "trivia".to_string(),
-                            Token::End => "end".to_string(),
+                        ExpectedToken::Token(token) => {
+                            match token {
+                                Token::Separator(c) => format!("'{}'", c),
+                                Token::Paren(c) => format!("'{}'", c),
+                                Token::Attribute => "@".to_string(),
+                                Token::Number(_) => "number".to_string(),
+                                Token::Word(s) => s.to_string(),
+                                Token::Operation(c) => format!("operation ('{}')", c),
+                                Token::LogicalOperation(c) => format!("logical operation ('{}')", c),
+                                Token::ShiftOperation(c) => format!("bitshift ('{}{}')", c, c),
+                                Token::AssignmentOperation(c) if c=='<' || c=='>' => format!("bitshift ('{}{}=')", c, c),
+                                Token::AssignmentOperation(c) => format!("operation ('{}=')", c),
+                                Token::IncrementOperation => "increment operation".to_string(),
+                                Token::DecrementOperation => "decrement operation".to_string(),
+                                Token::Arrow => "->".to_string(),
+                                Token::Unknown(c) => format!("unknown ('{}')", c),
+                                Token::Trivia => "trivia".to_string(),
+                                Token::End => "end".to_string(),
+                            }
                         }
-                    }
-                    ExpectedToken::Identifier => "identifier".to_string(),
-                    ExpectedToken::Number(ty) => {
-                        match ty {
-                            NumberType::I32 => "32-bit signed integer literal",
-                            NumberType::U32 => "32-bit unsigned integer literal",
-                            NumberType::F32 => "32-bit floating-point literal",
-                        }.to_string()
-                    },
-                    ExpectedToken::Integer => "unsigned/signed integer literal".to_string(),
-                    ExpectedToken::PrimaryExpression => "expression".to_string(),
-                    ExpectedToken::Assignment => "assignment or increment/decrement".to_string(),
-                    ExpectedToken::FieldName => "field name or a closing curly bracket to signify the end of the struct".to_string(),
-                    ExpectedToken::TypeAttribute => "type attribute".to_string(),
-                    ExpectedToken::SwitchItem => "switch item ('case' or 'default') or a closing curly bracket to signify the end of the switch statement ('}')".to_string(),
-                    ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
-                    ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
-                    ExpectedToken::Type => "type".to_string(),
-                    ExpectedToken::Variable => "variable access".to_string(),
-                    ExpectedToken::Function => "function name".to_string(),
-                    ExpectedToken::Constant => "compile-time constant".to_string(),
-                };
+                        ExpectedToken::Identifier => "identifier".to_string(),
+                        ExpectedToken::Number(ty) => {
+                            match ty {
+                                NumberType::I32 => "32-bit signed integer literal",
+                                NumberType::U32 => "32-bit unsigned integer literal",
+                                NumberType::F32 => "32-bit floating-point literal",
+                            }.to_string()
+                        },
+                        ExpectedToken::Integer => "unsigned/signed integer literal".to_string(),
+                        ExpectedToken::Constant => "compile-time constant".to_string(),
+                        ExpectedToken::PrimaryExpression => "expression".to_string(),
+                        ExpectedToken::Assignment => "assignment or increment/decrement".to_string(),
+                        ExpectedToken::FieldName => "field name or a closing curly bracket to signify the end of the struct".to_string(),
+                        ExpectedToken::TypeAttribute => "type attribute".to_string(),
+                        ExpectedToken::SwitchItem => "switch item ('case' or 'default') or a closing curly bracket to signify the end of the switch statement ('}')".to_string(),
+                        ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
+                        ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
+                        ExpectedToken::Type => "type".to_string(),
+                        ExpectedToken::Variable => "variable access".to_string(),
+                        ExpectedToken::Function => "function name".to_string(),
+                    };
                 ParseError {
                     message: format!(
                         "expected {}, found '{}'",
@@ -982,7 +974,7 @@ impl crate::ScalarKind {
 struct ParseExpressionContext<'input, 'temp, 'out> {
     expressions: &'out mut Arena<ast::Expression<'input>>,
     global_expressions: Option<&'out mut Arena<ast::Expression<'input>>>,
-    local_table: &'temp mut SymbolTable<&'input str, Handle<ast::Local>>,
+    local_table: &'temp mut super::SymbolTable<&'input str, Handle<ast::Local>>,
     locals: &'out mut Arena<ast::Local>,
     unresolved: &'out mut FastHashSet<ast::Dependency<'input>>,
 }
@@ -1052,7 +1044,7 @@ struct StatementContext<'source, 'temp, 'out> {
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
     read_expressions: &'temp Arena<ast::Expression<'source>>,
-    typifier: &'temp mut Typifier,
+    typifier: &'temp mut super::Typifier,
     variables: &'out mut Arena<crate::LocalVariable>,
     expressions: &'out mut Arena<crate::Expression>,
     named_expressions: &'out mut FastHashMap<Handle<crate::Expression>, String>,
@@ -1079,7 +1071,7 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
     fn as_expression<'t>(
         &'t mut self,
         block: &'t mut crate::Block,
-        emitter: &'t mut Emitter,
+        emitter: &'t mut super::Emitter,
     ) -> ExpressionContext<'a, 't, '_>
     where
         'temp: 't,
@@ -1110,13 +1102,13 @@ struct ExpressionContext<'source, 'temp, 'out> {
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
     read_expressions: &'temp Arena<ast::Expression<'source>>,
-    typifier: &'temp mut Typifier,
+    typifier: &'temp mut super::Typifier,
     expressions: &'out mut Arena<crate::Expression>,
     local_vars: &'out Arena<crate::LocalVariable>,
     arguments: &'out [crate::FunctionArgument],
     module: &'out mut crate::Module,
     block: &'temp mut crate::Block,
-    emitter: &'temp mut Emitter,
+    emitter: &'temp mut super::Emitter,
 }
 
 impl<'a> ExpressionContext<'a, '_, '_> {
@@ -1406,6 +1398,15 @@ struct TypedExpression {
     ///
     /// When this is true, `handle` must be a pointer.
     is_reference: bool,
+}
+
+impl TypedExpression {
+    const fn non_reference(handle: Handle<crate::Expression>) -> TypedExpression {
+        TypedExpression {
+            handle,
+            is_reference: false,
+        }
+    }
 }
 
 enum Composition {
@@ -1731,7 +1732,7 @@ impl Parser {
         word: &'a str,
         span: Span,
         mut ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<Option<ConstructorType<'a>>, Error<'a>> {
+    ) -> Result<Option<ast::ConstructorType<'a>>, Error<'a>> {
         if let Some((kind, width)) = conv::get_scalar_type(word) {
             return Ok(Some(ast::ConstructorType::Scalar { kind, width }));
         }
@@ -2379,7 +2380,7 @@ impl Parser {
         lexer: &mut Lexer<'a>,
         columns: crate::VectorSize,
         rows: crate::VectorSize,
-    ) -> Result<TypeKind<'a>, Error<'a>> {
+    ) -> Result<ast::TypeKind<'a>, Error<'a>> {
         let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
         match kind {
             crate::ScalarKind::Float => Ok(ast::TypeKind::Matrix {
@@ -2397,15 +2398,15 @@ impl Parser {
         _attribute: TypeAttributes,
         word: &'a str,
         mut ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<Option<TypeKind<'a>>, Error<'a>> {
+    ) -> Result<Option<ast::TypeKind<'a>>, Error<'a>> {
         if let Some((kind, width)) = conv::get_scalar_type(word) {
-            return Ok(Some(TypeKind::Scalar { kind, width }));
+            return Ok(Some(ast::TypeKind::Scalar { kind, width }));
         }
 
         Ok(Some(match word {
             "vec2" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                TypeKind::Vector {
+                ast::TypeKind::Vector {
                     size: crate::VectorSize::Bi,
                     kind,
                     width,
@@ -2413,7 +2414,7 @@ impl Parser {
             }
             "vec3" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                TypeKind::Vector {
+                ast::TypeKind::Vector {
                     size: crate::VectorSize::Tri,
                     kind,
                     width,
@@ -2421,7 +2422,7 @@ impl Parser {
             }
             "vec4" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                TypeKind::Vector {
+                ast::TypeKind::Vector {
                     size: crate::VectorSize::Quad,
                     kind,
                     width,
@@ -2468,7 +2469,7 @@ impl Parser {
             )?,
             "atomic" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                TypeKind::Atomic { kind, width }
+                ast::TypeKind::Atomic { kind, width }
             }
             "ptr" => {
                 lexer.expect_generic_paren('<')?;
@@ -2484,7 +2485,7 @@ impl Parser {
                     };
                 }
                 lexer.expect_generic_paren('>')?;
-                TypeKind::Pointer {
+                ast::TypeKind::Pointer {
                     base: Box::new(base),
                     space,
                 }
@@ -2536,17 +2537,17 @@ impl Parser {
                 };
                 lexer.expect_generic_paren('>')?;
 
-                TypeKind::BindingArray {
+                ast::TypeKind::BindingArray {
                     base: Box::new(base),
                     size,
                 }
             }
-            "sampler" => TypeKind::Sampler { comparison: false },
-            "sampler_comparison" => TypeKind::Sampler { comparison: true },
+            "sampler" => ast::TypeKind::Sampler { comparison: false },
+            "sampler_comparison" => ast::TypeKind::Sampler { comparison: true },
             "texture_1d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2555,7 +2556,7 @@ impl Parser {
             "texture_1d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2564,7 +2565,7 @@ impl Parser {
             "texture_2d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2573,7 +2574,7 @@ impl Parser {
             "texture_2d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2582,7 +2583,7 @@ impl Parser {
             "texture_3d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D3,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2591,7 +2592,7 @@ impl Parser {
             "texture_cube" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::Cube,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2600,7 +2601,7 @@ impl Parser {
             "texture_cube_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::Cube,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2609,7 +2610,7 @@ impl Parser {
             "texture_multisampled_2d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: true },
@@ -2618,40 +2619,40 @@ impl Parser {
             "texture_multisampled_2d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: true },
                 }
             }
-            "texture_depth_2d" => TypeKind::Image {
+            "texture_depth_2d" => ast::TypeKind::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_2d_array" => TypeKind::Image {
+            "texture_depth_2d_array" => ast::TypeKind::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: true,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_cube" => TypeKind::Image {
+            "texture_depth_cube" => ast::TypeKind::Image {
                 dim: crate::ImageDimension::Cube,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_cube_array" => TypeKind::Image {
+            "texture_depth_cube_array" => ast::TypeKind::Image {
                 dim: crate::ImageDimension::Cube,
                 arrayed: true,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_multisampled_2d" => TypeKind::Image {
+            "texture_depth_multisampled_2d" => ast::TypeKind::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: true },
             },
             "texture_storage_1d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -2659,7 +2660,7 @@ impl Parser {
             }
             "texture_storage_1d_array" => {
                 let (format, access) = lexer.next_format_generic()?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: true,
                     class: crate::ImageClass::Storage { format, access },
@@ -2667,7 +2668,7 @@ impl Parser {
             }
             "texture_storage_2d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -2675,7 +2676,7 @@ impl Parser {
             }
             "texture_storage_2d_array" => {
                 let (format, access) = lexer.next_format_generic()?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Storage { format, access },
@@ -2683,7 +2684,7 @@ impl Parser {
             }
             "texture_storage_3d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                TypeKind::Image {
+                ast::TypeKind::Image {
                     dim: crate::ImageDimension::D3,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -3428,7 +3429,7 @@ impl Parser {
     fn parse_function_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        out: &mut TranslationUnit<'a>,
+        out: &mut ast::TranslationUnit<'a>,
         dependencies: &mut FastHashSet<ast::Dependency<'a>>,
     ) -> Result<ast::Function<'a>, Error<'a>> {
         self.push_rule_span(Rule::FunctionDecl, lexer);
@@ -3439,7 +3440,7 @@ impl Parser {
         }
 
         let mut locals = Arena::new();
-        let mut local_table = SymbolTable::default();
+        let mut local_table = super::SymbolTable::default();
 
         // read parameter list
         let mut arguments = Vec::new();
@@ -3458,7 +3459,7 @@ impl Parser {
                 ParseExpressionContext {
                     expressions: &mut out.global_expressions,
                     global_expressions: None,
-                    local_table: &mut SymbolTable::default(),
+                    local_table: &mut super::SymbolTable::default(),
                     locals: &mut locals,
                     unresolved: dependencies,
                 },
@@ -3532,7 +3533,7 @@ impl Parser {
     fn parse_global_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        out: &mut TranslationUnit<'a>,
+        out: &mut ast::TranslationUnit<'a>,
     ) -> Result<bool, Error<'a>> {
         // read attributes
         let mut binding = None;
@@ -3624,7 +3625,7 @@ impl Parser {
                     ParseExpressionContext {
                         expressions: &mut out.global_expressions,
                         global_expressions: None,
-                        local_table: &mut SymbolTable::default(),
+                        local_table: &mut super::SymbolTable::default(),
                         locals: &mut Arena::new(),
                         unresolved: &mut dependencies,
                     },
@@ -3649,7 +3650,7 @@ impl Parser {
                     ParseExpressionContext {
                         expressions: &mut out.global_expressions,
                         global_expressions: None,
-                        local_table: &mut SymbolTable::default(),
+                        local_table: &mut super::SymbolTable::default(),
                         locals: &mut Arena::new(),
                         unresolved: &mut dependencies,
                     },
@@ -3680,7 +3681,7 @@ impl Parser {
                         ParseExpressionContext {
                             expressions: &mut out.global_expressions,
                             global_expressions: None,
-                            local_table: &mut SymbolTable::default(),
+                            local_table: &mut super::SymbolTable::default(),
                             locals: &mut Arena::new(),
                             unresolved: &mut dependencies,
                         },
@@ -3696,7 +3697,7 @@ impl Parser {
                     ParseExpressionContext {
                         expressions: &mut out.global_expressions,
                         global_expressions: None,
-                        local_table: &mut SymbolTable::default(),
+                        local_table: &mut super::SymbolTable::default(),
                         locals: &mut Arena::new(),
                         unresolved: &mut dependencies,
                     },
@@ -3724,7 +3725,7 @@ impl Parser {
                     ParseExpressionContext {
                         expressions: &mut out.global_expressions,
                         global_expressions: None,
-                        local_table: &mut SymbolTable::default(),
+                        local_table: &mut super::SymbolTable::default(),
                         locals: &mut Arena::new(),
                         unresolved: &mut dependencies,
                     },
@@ -3786,7 +3787,7 @@ impl Parser {
         self.reset();
 
         let mut lexer = Lexer::new(source);
-        let mut tu = TranslationUnit::default();
+        let mut tu = ast::TranslationUnit::default();
         loop {
             match self.parse_global_decl(&mut lexer, &mut tu) {
                 Err(error) => return Err(error.as_parse_error(lexer.source)),
@@ -3802,7 +3803,7 @@ impl Parser {
             }
         }
 
-        let index = Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
+        let index = index::Index::generate(&tu).map_err(|x| x.as_parse_error(source))?;
         let module = Lowerer::new(&index)
             .lower(&tu)
             .map_err(|x| x.as_parse_error(source))?;
@@ -3825,12 +3826,12 @@ enum ConstantOrInner {
 }
 
 struct Lowerer<'source, 'temp> {
-    index: &'temp Index<'source>,
+    index: &'temp index::Index<'source>,
     layouter: Layouter,
 }
 
 impl<'source, 'temp> Lowerer<'source, 'temp> {
-    pub fn new(index: &'temp Index<'source>) -> Self {
+    pub fn new(index: &'temp index::Index<'source>) -> Self {
         Self {
             index,
             layouter: Layouter::default(),
@@ -3839,7 +3840,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     pub fn lower(
         &mut self,
-        tu: &'temp TranslationUnit<'source>,
+        tu: &'temp ast::TranslationUnit<'source>,
     ) -> Result<crate::Module, Error<'source>> {
         let mut module = crate::Module::default();
         let mut globals = FastHashMap::default();
@@ -3849,7 +3850,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             let decl = &tu.decls[decl];
 
             match decl.kind {
-                GlobalDeclKind::Fn(ref f) => {
+                ast::GlobalDeclKind::Fn(ref f) => {
                     let decl = self.lower_fn(
                         f,
                         span,
@@ -3862,7 +3863,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     )?;
                     globals.insert(f.name.name, decl);
                 }
-                GlobalDeclKind::Var(ref v) => {
+                ast::GlobalDeclKind::Var(ref v) => {
                     let mut ctx = OutputContext {
                         read_expressions: None,
                         global_expressions: &tu.global_expressions,
@@ -3896,7 +3897,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     globals.insert(v.name.name, GlobalDecl::Var(handle));
                 }
-                GlobalDeclKind::Const(ref c) => {
+                ast::GlobalDeclKind::Const(ref c) => {
                     let mut ctx = OutputContext {
                         read_expressions: None,
                         global_expressions: &tu.global_expressions,
@@ -3960,7 +3961,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     globals.insert(c.name.name, GlobalDecl::Const(handle));
                 }
-                GlobalDeclKind::Struct(ref s) => {
+                ast::GlobalDeclKind::Struct(ref s) => {
                     let handle = self.lower_struct(
                         s,
                         span,
@@ -3973,7 +3974,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     )?;
                     globals.insert(s.name.name, GlobalDecl::Type(handle));
                 }
-                GlobalDeclKind::Type(ref alias) => {
+                ast::GlobalDeclKind::Type(ref alias) => {
                     let ty = self.resolve_type(
                         &alias.ty,
                         OutputContext {
@@ -4000,7 +4001,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let mut local_table = FastHashMap::default();
         let mut local_variables = Arena::new();
         let mut expressions = Arena::new();
-        let mut named_expressions = NamedExpressions::default();
+        let mut named_expressions = crate::NamedExpressions::default();
 
         let arguments = f
             .arguments
@@ -4012,13 +4013,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     crate::Expression::FunctionArgument(i as u32),
                     arg.name.span.clone().into(),
                 );
-                local_table.insert(
-                    arg.handle,
-                    TypedExpression {
-                        handle: expr,
-                        is_reference: false,
-                    },
-                );
+                local_table.insert(arg.handle, TypedExpression::non_reference(expr));
                 named_expressions.insert(expr, arg.name.name.to_string());
 
                 Ok(crate::FunctionArgument {
@@ -4109,8 +4104,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 crate::Statement::Block(block)
             }
             ast::StatementKind::VarDecl(ref decl) => match **decl {
-                VarDecl::Let(ref l) => {
-                    let mut emitter = Emitter::default();
+                ast::VarDecl::Let(ref l) => {
+                    let mut emitter = super::Emitter::default();
                     emitter.start(ctx.expressions);
 
                     let value =
@@ -4147,19 +4142,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     }
 
                     block.extend(emitter.finish(ctx.expressions));
-                    ctx.local_table.insert(
-                        l.handle,
-                        TypedExpression {
-                            handle: value,
-                            is_reference: false,
-                        },
-                    );
+                    ctx.local_table
+                        .insert(l.handle, TypedExpression::non_reference(value));
                     ctx.named_expressions.insert(value, l.name.name.to_string());
 
                     return Ok(());
                 }
-                VarDecl::Var(ref v) => {
-                    let mut emitter = Emitter::default();
+                ast::VarDecl::Var(ref v) => {
+                    let mut emitter = super::Emitter::default();
                     emitter.start(ctx.expressions);
 
                     let value = v
@@ -4249,7 +4239,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref accept,
                 ref reject,
             } => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let condition =
@@ -4269,7 +4259,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 selector,
                 ref cases,
             } => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let mut ectx = ctx.as_expression(block, &mut emitter);
@@ -4315,7 +4305,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let body = self.lower_block(body, ctx.reborrow())?;
                 let mut continuing = self.lower_block(continuing, ctx.reborrow())?;
 
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
                 let break_if = break_if
                     .map(|expr| self.lower_expression(expr, ctx.as_expression(block, &mut emitter)))
@@ -4331,7 +4321,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             ast::StatementKind::Break => crate::Statement::Break,
             ast::StatementKind::Continue => crate::Statement::Continue,
             ast::StatementKind::Return { value } => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let value = value
@@ -4346,7 +4336,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref function,
                 ref arguments,
             } => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let _ = self.call(
@@ -4359,7 +4349,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 return Ok(());
             }
             ast::StatementKind::Assign { target, op, value } => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let expr = self.lower_expression_for_reference(
@@ -4409,7 +4399,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
             }
             ast::StatementKind::Increment(value) | ast::StatementKind::Decrement(value) => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let op = match stmt.kind {
@@ -4476,7 +4466,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 }
             }
             ast::StatementKind::Ignore(expr) => {
-                let mut emitter = Emitter::default();
+                let mut emitter = super::Emitter::default();
                 emitter.start(ctx.expressions);
 
                 let _ = self.lower_expression(expr, ctx.as_expression(block, &mut emitter))?;
@@ -4539,10 +4529,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     NagaSpan::UNDEFINED,
                 );
                 let handle = ctx.interrupt_emitter(crate::Expression::Constant(handle), span);
-                return Ok(TypedExpression {
-                    handle,
-                    is_reference: false,
-                });
+                return Ok(TypedExpression::non_reference(handle));
             }
             ast::Expression::Ident(ast::IdentExpr::Local(local)) => {
                 return Ok(ctx.local_table[&local])
@@ -4580,10 +4567,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => {
                 let handle =
                     self.construct(span, ty, ty_span.clone(), components, ctx.reborrow())?;
-                return Ok(TypedExpression {
-                    handle,
-                    is_reference: false,
-                });
+                return Ok(TypedExpression::non_reference(handle));
             }
             ast::Expression::Unary { op, expr } => {
                 let expr = self.lower_expression(expr, ctx.reborrow())?;
@@ -4634,10 +4618,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let handle = self
                     .call(span, function, arguments, ctx.reborrow())?
                     .ok_or_else(|| Error::FunctionReturnsVoid(function.span.clone()))?;
-                return Ok(TypedExpression {
-                    handle,
-                    is_reference: false,
-                });
+                return Ok(TypedExpression::non_reference(handle));
             }
             ast::Expression::Index { base, index } => {
                 let expr = self.lower_expression_for_reference(base, ctx.reborrow())?;
@@ -4826,7 +4807,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             Some(&GlobalDecl::Type(ty)) => {
                 let handle = self.construct(
                     span,
-                    &ConstructorType::Type(ty),
+                    &ast::ConstructorType::Type(ty),
                     function.span.clone(),
                     arguments,
                     ctx.reborrow(),
@@ -5806,11 +5787,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
         let inner = match ty.kind {
-            TypeKind::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
-            TypeKind::Vector { size, kind, width } => {
+            ast::TypeKind::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
+            ast::TypeKind::Vector { size, kind, width } => {
                 crate::TypeInner::Vector { size, kind, width }
             }
-            TypeKind::Matrix {
+            ast::TypeKind::Matrix {
                 rows,
                 columns,
                 width,
@@ -5819,12 +5800,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 rows,
                 width,
             },
-            TypeKind::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
-            TypeKind::Pointer { ref base, space } => {
+            ast::TypeKind::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
+            ast::TypeKind::Pointer { ref base, space } => {
                 let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
                 crate::TypeInner::Pointer { base, space }
             }
-            TypeKind::Array { ref base, size } => {
+            ast::TypeKind::Array { ref base, size } => {
                 let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)
@@ -5847,7 +5828,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     stride: self.layouter[base].to_stride(),
                 }
             }
-            TypeKind::Image {
+            ast::TypeKind::Image {
                 dim,
                 arrayed,
                 class,
@@ -5856,8 +5837,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 arrayed,
                 class,
             },
-            TypeKind::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
-            TypeKind::BindingArray { ref base, size } => {
+            ast::TypeKind::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
+            ast::TypeKind::BindingArray { ref base, size } => {
                 let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
 
                 crate::TypeInner::BindingArray {
@@ -5876,7 +5857,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     },
                 }
             }
-            TypeKind::User(ref ident) => {
+            ast::TypeKind::User(ref ident) => {
                 return match ctx.globals.get(ident.name) {
                     Some(&GlobalDecl::Type(handle)) => Ok(handle),
                     Some(_) => Err(Error::Unexpected(ident.span.clone(), ExpectedToken::Type)),
@@ -5964,7 +5945,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => match ctx.globals.get(function.name) {
                 Some(&GlobalDecl::Type(ty)) => self.const_construct(
                     expr_span,
-                    &ConstructorType::Type(ty),
+                    &ast::ConstructorType::Type(ty),
                     arguments,
                     ctx.reborrow(),
                 )?,
