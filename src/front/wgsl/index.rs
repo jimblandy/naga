@@ -1,6 +1,5 @@
-use crate::front::wgsl::Error;
-use crate::front::wgsl::{ast, Span};
-use crate::{FastHashMap, Handle};
+use super::{ast, Error};
+use crate::{FastHashMap, Handle, Span};
 
 pub struct Index<'a> {
     dependency_order: Vec<Handle<ast::GlobalDecl<'a>>>,
@@ -81,7 +80,7 @@ impl<'a> DependencySolver<'a, '_> {
             if let Some(&dep_id) = self.globals.get(dep.ident) {
                 self.path.push(ResolvedDependency {
                     decl: dep_id,
-                    usage: dep.usage.clone(),
+                    usage: dep.usage,
                 });
                 let dep_id_usize = dep_id.index();
 
@@ -90,7 +89,7 @@ impl<'a> DependencySolver<'a, '_> {
                     return if dep_id == id {
                         Err(Error::RecursiveDeclaration {
                             ident: decl_ident(decl).span,
-                            usage: dep.usage.clone(),
+                            usage: dep.usage,
                         })
                     } else {
                         let start_at = self
@@ -110,7 +109,7 @@ impl<'a> DependencySolver<'a, '_> {
                                     let curr_id = curr_dep.decl;
                                     let curr_decl = &self.module.decls[curr_id];
 
-                                    (decl_ident(curr_decl).span, curr_dep.usage.clone())
+                                    (decl_ident(curr_decl).span, curr_dep.usage)
                                 })
                                 .collect(),
                         })

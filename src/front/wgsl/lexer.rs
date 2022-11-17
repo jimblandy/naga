@@ -1,4 +1,5 @@
-use super::{conv, number::consume_number, Error, ExpectedToken, Span, Token, TokenSpan};
+use super::{conv, number::consume_number, Error, ExpectedToken, Token, TokenSpan};
+use crate::Span;
 
 fn consume_any(input: &str, what: impl Fn(char) -> bool) -> (&str, &str) {
     let pos = input.find(|c| !what(c)).unwrap_or(input.len());
@@ -176,10 +177,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub(super) const fn _leftover_span(&self) -> Span {
-        self.source.len() - self.input.len()..self.source.len()
-    }
-
     /// Calls the function with a lexer and returns the result of the function as well as the span for everything the function parsed
     ///
     /// # Examples
@@ -196,7 +193,7 @@ impl<'a> Lexer<'a> {
         let start = self.current_byte_offset();
         let res = inner(self)?;
         let end = self.current_byte_offset();
-        Ok((res, start..end))
+        Ok((res, Span::from(start..end)))
     }
 
     pub(super) fn start_byte_offset(&mut self) -> usize {
@@ -211,10 +208,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub(super) const fn end_byte_offset(&self) -> usize {
-        self.last_end_offset
-    }
-
     fn peek_token_and_rest(&mut self) -> (TokenSpan<'a>, &'a str) {
         let mut cloned = self.clone();
         let token = cloned.next();
@@ -226,35 +219,31 @@ impl<'a> Lexer<'a> {
         self.source.len() - self.input.len()
     }
 
-    pub(super) const fn span_from(&self, offset: usize) -> Span {
-        offset..self.end_byte_offset()
+    pub(super) fn span_from(&self, offset: usize) -> Span {
+        Span::from(offset..self.last_end_offset)
     }
 
     #[must_use]
     pub(super) fn next(&mut self) -> TokenSpan<'a> {
+        self.next_impl(false)
+    }
+
+    #[must_use]
+    pub(super) fn next_generic(&mut self) -> TokenSpan<'a> {
+        self.next_impl(true)
+    }
+
+    fn next_impl(&mut self, generic: bool) -> TokenSpan<'a> {
         let mut start_byte_offset = self.current_byte_offset();
         loop {
-            let (token, rest) = consume_token(self.input, false);
+            let (token, rest) = consume_token(self.input, generic);
             self.input = rest;
             match token {
                 Token::Trivia => start_byte_offset = self.current_byte_offset(),
                 _ => {
                     self.last_end_offset = self.current_byte_offset();
-                    return (token, start_byte_offset..self.last_end_offset);
+                    return (token, self.span_from(start_byte_offset));
                 }
-            }
-        }
-    }
-
-    #[must_use]
-    pub(super) fn next_generic(&mut self) -> TokenSpan<'a> {
-        let mut start_byte_offset = self.current_byte_offset();
-        loop {
-            let (token, rest) = consume_token(self.input, true);
-            self.input = rest;
-            match token {
-                Token::Trivia => start_byte_offset = self.current_byte_offset(),
-                _ => return (token, start_byte_offset..self.current_byte_offset()),
             }
         }
     }
@@ -265,10 +254,7 @@ impl<'a> Lexer<'a> {
         token
     }
 
-    pub(super) fn expect_span(
-        &mut self,
-        expected: Token<'a>,
-    ) -> Result<std::ops::Range<usize>, Error<'a>> {
+    pub(super) fn expect_span(&mut self, expected: Token<'a>) -> Result<Span, Error<'a>> {
         let next = self.next();
         if next.0 == expected {
             Ok(next.1)
@@ -346,7 +332,7 @@ impl<'a> Lexer<'a> {
         self.expect_generic_paren('<')?;
         let pair = match self.next() {
             (Token::Word(word), span) => conv::get_scalar_type(word)
-                .map(|(a, b)| (a, b, span.clone()))
+                .map(|(a, b)| (a, b, span))
                 .ok_or(Error::UnknownScalarType(span)),
             (_, span) => Err(Error::UnknownScalarType(span)),
         }?;

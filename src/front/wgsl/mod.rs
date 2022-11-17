@@ -17,8 +17,7 @@ use crate::{
     arena::{Arena, Handle, UniqueArena},
     proc::{ensure_block_returns, Alignment, Layouter, ResolveContext, ResolveError},
     span::SourceLocation,
-    span::Span as NagaSpan,
-    FastHashMap, FastHashSet,
+    FastHashMap, FastHashSet, Span,
 };
 
 use self::{lexer::Lexer, number::Number};
@@ -33,7 +32,6 @@ use codespan_reporting::{
 use std::{borrow::Cow, convert::TryFrom, ops::Range};
 use thiserror::Error;
 
-type Span = Range<usize>;
 type TokenSpan<'a> = (Token<'a>, Span);
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -198,7 +196,7 @@ pub enum Error<'a> {
 impl<'a> Error<'a> {
     fn as_parse_error(&self, source: &'a str) -> ParseError {
         match *self {
-            Error::Unexpected(ref unexpected_span, expected) => {
+            Error::Unexpected(unexpected_span, expected) => {
                 let expected_str = match expected {
                         ExpectedToken::Token(token) => {
                             match token {
@@ -244,110 +242,96 @@ impl<'a> Error<'a> {
                 ParseError {
                     message: format!(
                         "expected {}, found '{}'",
-                        expected_str,
-                        &source[unexpected_span.clone()],
+                        expected_str, &source[unexpected_span],
                     ),
-                    labels: vec![(
-                        unexpected_span.clone(),
-                        format!("expected {}", expected_str).into(),
-                    )],
+                    labels: vec![(unexpected_span, format!("expected {}", expected_str).into())],
                     notes: vec![],
                 }
             }
-            Error::UnexpectedComponents(ref bad_span) => ParseError {
+            Error::UnexpectedComponents(bad_span) => ParseError {
                 message: "unexpected components".to_string(),
-                labels: vec![(bad_span.clone(), "unexpected components".into())],
+                labels: vec![(bad_span, "unexpected components".into())],
                 notes: vec![],
             },
-            Error::BadNumber(ref bad_span, ref err) => ParseError {
-                message: format!("{}: `{}`", err, &source[bad_span.clone()],),
-                labels: vec![(bad_span.clone(), err.to_string().into())],
+            Error::BadNumber(bad_span, ref err) => ParseError {
+                message: format!("{}: `{}`", err, &source[bad_span],),
+                labels: vec![(bad_span, err.to_string().into())],
                 notes: vec![],
             },
-            Error::NegativeInt(ref bad_span) => ParseError {
+            Error::NegativeInt(bad_span) => ParseError {
                 message: format!(
                     "expected non-negative integer literal, found `{}`",
-                    &source[bad_span.clone()],
+                    &source[bad_span],
                 ),
-                labels: vec![(bad_span.clone(), "expected non-negative integer".into())],
+                labels: vec![(bad_span, "expected non-negative integer".into())],
                 notes: vec![],
             },
-            Error::BadU32Constant(ref bad_span) => ParseError {
+            Error::BadU32Constant(bad_span) => ParseError {
                 message: format!(
                     "expected unsigned integer constant expression, found `{}`",
-                    &source[bad_span.clone()],
+                    &source[bad_span],
                 ),
-                labels: vec![(bad_span.clone(), "expected unsigned integer".into())],
+                labels: vec![(bad_span, "expected unsigned integer".into())],
                 notes: vec![],
             },
-            Error::BadMatrixScalarKind(ref span, kind, width) => ParseError {
+            Error::BadMatrixScalarKind(span, kind, width) => ParseError {
                 message: format!(
                     "matrix scalar type must be floating-point, but found `{}`",
                     kind.to_wgsl(width)
                 ),
-                labels: vec![(span.clone(), "must be floating-point (e.g. `f32`)".into())],
+                labels: vec![(span, "must be floating-point (e.g. `f32`)".into())],
                 notes: vec![],
             },
-            Error::BadAccessor(ref accessor_span) => ParseError {
-                message: format!(
-                    "invalid field accessor `{}`",
-                    &source[accessor_span.clone()],
-                ),
-                labels: vec![(accessor_span.clone(), "invalid accessor".into())],
+            Error::BadAccessor(accessor_span) => ParseError {
+                message: format!("invalid field accessor `{}`", &source[accessor_span],),
+                labels: vec![(accessor_span, "invalid accessor".into())],
                 notes: vec![],
             },
-            Error::UnknownIdent(ref ident_span, ident) => ParseError {
+            Error::UnknownIdent(ident_span, ident) => ParseError {
                 message: format!("no definition in scope for identifier: '{}'", ident),
-                labels: vec![(ident_span.clone(), "unknown identifier".into())],
+                labels: vec![(ident_span, "unknown identifier".into())],
                 notes: vec![],
             },
-            Error::UnknownScalarType(ref bad_span) => ParseError {
-                message: format!("unknown scalar type: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown scalar type".into())],
+            Error::UnknownScalarType(bad_span) => ParseError {
+                message: format!("unknown scalar type: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown scalar type".into())],
                 notes: vec!["Valid scalar types are f16, f32, f64, \
                              i8, i16, i32, i64, \
                              u8, u16, u32, u64, bool"
                     .into()],
             },
-            Error::BadTextureSampleType {
-                ref span,
-                kind,
-                width,
-            } => ParseError {
+            Error::BadTextureSampleType { span, kind, width } => ParseError {
                 message: format!(
                     "texture sample type must be one of f32, i32 or u32, but found {}",
                     kind.to_wgsl(width)
                 ),
-                labels: vec![(span.clone(), "must be one of f32, i32 or u32".into())],
+                labels: vec![(span, "must be one of f32, i32 or u32".into())],
                 notes: vec![],
             },
-            Error::BadIncrDecrReferenceType(ref span) => ParseError {
+            Error::BadIncrDecrReferenceType(span) => ParseError {
                 message:
                     "increment/decrement operation requires reference type to be one of i32 or u32"
                         .to_string(),
-                labels: vec![(
-                    span.clone(),
-                    "must be a reference type of i32 or u32".into(),
-                )],
+                labels: vec![(span, "must be a reference type of i32 or u32".into())],
                 notes: vec![],
             },
-            Error::BadTexture(ref bad_span) => ParseError {
+            Error::BadTexture(bad_span) => ParseError {
                 message: format!(
                     "expected an image, but found '{}' which is not an image",
-                    &source[bad_span.clone()]
+                    &source[bad_span]
                 ),
-                labels: vec![(bad_span.clone(), "not an image".into())],
+                labels: vec![(bad_span, "not an image".into())],
                 notes: vec![],
             },
             Error::BadTypeCast {
-                ref span,
+                span,
                 ref from_type,
                 ref to_type,
             } => {
                 let msg = format!("cannot cast a {} to a {}", from_type, to_type);
                 ParseError {
                     message: msg.clone(),
-                    labels: vec![(span.clone(), msg.into())],
+                    labels: vec![(span, msg.into())],
                     notes: vec![],
                 }
             }
@@ -356,262 +340,229 @@ impl<'a> Error<'a> {
                 labels: vec![],
                 notes: vec![],
             },
-            Error::InvalidForInitializer(ref bad_span) => ParseError {
+            Error::InvalidForInitializer(bad_span) => ParseError {
                 message: format!(
                     "for(;;) initializer is not an assignment or a function call: '{}'",
-                    &source[bad_span.clone()]
+                    &source[bad_span]
                 ),
-                labels: vec![(
-                    bad_span.clone(),
-                    "not an assignment or function call".into(),
-                )],
+                labels: vec![(bad_span, "not an assignment or function call".into())],
                 notes: vec![],
             },
-            Error::InvalidBreakIf(ref bad_span) => ParseError {
+            Error::InvalidBreakIf(bad_span) => ParseError {
                 message: "A break if is only allowed in a continuing block".to_string(),
-                labels: vec![(bad_span.clone(), "not in a continuing block".into())],
+                labels: vec![(bad_span, "not in a continuing block".into())],
                 notes: vec![],
             },
-            Error::InvalidGatherComponent(ref bad_span) => ParseError {
+            Error::InvalidGatherComponent(bad_span) => ParseError {
                 message: format!(
                     "textureGather component '{}' doesn't exist, must be 0, 1, 2, or 3",
-                    &source[bad_span.clone()]
+                    &source[bad_span]
                 ),
-                labels: vec![(bad_span.clone(), "invalid component".into())],
+                labels: vec![(bad_span, "invalid component".into())],
                 notes: vec![],
             },
-            Error::InvalidConstructorComponentType(ref bad_span, component) => ParseError {
+            Error::InvalidConstructorComponentType(bad_span, component) => ParseError {
                 message: format!(
                     "invalid type for constructor component at index [{}]",
                     component
                 ),
-                labels: vec![(bad_span.clone(), "invalid component type".into())],
+                labels: vec![(bad_span, "invalid component type".into())],
                 notes: vec![],
             },
-            Error::InvalidIdentifierUnderscore(ref bad_span) => ParseError {
+            Error::InvalidIdentifierUnderscore(bad_span) => ParseError {
                 message: "Identifier can't be '_'".to_string(),
-                labels: vec![(bad_span.clone(), "invalid identifier".into())],
+                labels: vec![(bad_span, "invalid identifier".into())],
                 notes: vec![
                     "Use phony assignment instead ('_ =' notice the absence of 'let' or 'var')"
                         .to_string(),
                 ],
             },
-            Error::ReservedIdentifierPrefix(ref bad_span) => ParseError {
+            Error::ReservedIdentifierPrefix(bad_span) => ParseError {
                 message: format!(
                     "Identifier starts with a reserved prefix: '{}'",
-                    &source[bad_span.clone()]
+                    &source[bad_span]
                 ),
-                labels: vec![(bad_span.clone(), "invalid identifier".into())],
+                labels: vec![(bad_span, "invalid identifier".into())],
                 notes: vec![],
             },
-            Error::UnknownAddressSpace(ref bad_span) => ParseError {
-                message: format!("unknown address space: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown address space".into())],
+            Error::UnknownAddressSpace(bad_span) => ParseError {
+                message: format!("unknown address space: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown address space".into())],
                 notes: vec![],
             },
-            Error::UnknownAttribute(ref bad_span) => ParseError {
-                message: format!("unknown attribute: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown attribute".into())],
+            Error::UnknownAttribute(bad_span) => ParseError {
+                message: format!("unknown attribute: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown attribute".into())],
                 notes: vec![],
             },
-            Error::UnknownBuiltin(ref bad_span) => ParseError {
-                message: format!("unknown builtin: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown builtin".into())],
+            Error::UnknownBuiltin(bad_span) => ParseError {
+                message: format!("unknown builtin: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown builtin".into())],
                 notes: vec![],
             },
-            Error::UnknownAccess(ref bad_span) => ParseError {
-                message: format!("unknown access: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown access".into())],
+            Error::UnknownAccess(bad_span) => ParseError {
+                message: format!("unknown access: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown access".into())],
                 notes: vec![],
             },
-            Error::UnknownStorageFormat(ref bad_span) => ParseError {
-                message: format!("unknown storage format: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown storage format".into())],
+            Error::UnknownStorageFormat(bad_span) => ParseError {
+                message: format!("unknown storage format: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown storage format".into())],
                 notes: vec![],
             },
-            Error::UnknownConservativeDepth(ref bad_span) => ParseError {
-                message: format!(
-                    "unknown conservative depth: '{}'",
-                    &source[bad_span.clone()]
-                ),
-                labels: vec![(bad_span.clone(), "unknown conservative depth".into())],
+            Error::UnknownConservativeDepth(bad_span) => ParseError {
+                message: format!("unknown conservative depth: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown conservative depth".into())],
                 notes: vec![],
             },
-            Error::UnknownType(ref bad_span) => ParseError {
-                message: format!("unknown type: '{}'", &source[bad_span.clone()]),
-                labels: vec![(bad_span.clone(), "unknown type".into())],
+            Error::UnknownType(bad_span) => ParseError {
+                message: format!("unknown type: '{}'", &source[bad_span]),
+                labels: vec![(bad_span, "unknown type".into())],
                 notes: vec![],
             },
-            Error::SizeAttributeTooLow(ref bad_span, min_size) => ParseError {
+            Error::SizeAttributeTooLow(bad_span, min_size) => ParseError {
                 message: format!("struct member size must be at least {}", min_size),
-                labels: vec![(
-                    bad_span.clone(),
-                    format!("must be at least {}", min_size).into(),
-                )],
+                labels: vec![(bad_span, format!("must be at least {}", min_size).into())],
                 notes: vec![],
             },
-            Error::AlignAttributeTooLow(ref bad_span, min_align) => ParseError {
+            Error::AlignAttributeTooLow(bad_span, min_align) => ParseError {
                 message: format!("struct member alignment must be at least {}", min_align),
-                labels: vec![(
-                    bad_span.clone(),
-                    format!("must be at least {}", min_align).into(),
-                )],
+                labels: vec![(bad_span, format!("must be at least {}", min_align).into())],
                 notes: vec![],
             },
-            Error::NonPowerOfTwoAlignAttribute(ref bad_span) => ParseError {
+            Error::NonPowerOfTwoAlignAttribute(bad_span) => ParseError {
                 message: "struct member alignment must be a power of 2".to_string(),
-                labels: vec![(bad_span.clone(), "must be a power of 2".into())],
+                labels: vec![(bad_span, "must be a power of 2".into())],
                 notes: vec![],
             },
-            Error::InconsistentBinding(ref span) => ParseError {
+            Error::InconsistentBinding(span) => ParseError {
                 message: "input/output binding is not consistent".to_string(),
-                labels: vec![(
-                    span.clone(),
-                    "input/output binding is not consistent".into(),
-                )],
+                labels: vec![(span, "input/output binding is not consistent".into())],
                 notes: vec![],
             },
-            Error::TypeNotConstructible(ref span) => ParseError {
-                message: format!("type `{}` is not constructible", &source[span.clone()]),
-                labels: vec![(span.clone(), "type is not constructible".into())],
+            Error::TypeNotConstructible(span) => ParseError {
+                message: format!("type `{}` is not constructible", &source[span]),
+                labels: vec![(span, "type is not constructible".into())],
                 notes: vec![],
             },
-            Error::TypeNotInferrable(ref span) => ParseError {
+            Error::TypeNotInferrable(span) => ParseError {
                 message: "type can't be inferred".to_string(),
-                labels: vec![(span.clone(), "type can't be inferred".into())],
+                labels: vec![(span, "type can't be inferred".into())],
                 notes: vec![],
             },
-            Error::InitializationTypeMismatch(ref name_span, ref expected_ty, ref got_ty) => {
+            Error::InitializationTypeMismatch(name_span, ref expected_ty, ref got_ty) => {
                 ParseError {
                     message: format!(
                         "the type of `{}` is expected to be `{}`, but got `{}`",
-                        &source[name_span.clone()],
-                        expected_ty,
-                        got_ty,
+                        &source[name_span], expected_ty, got_ty,
                     ),
                     labels: vec![(
-                        name_span.clone(),
-                        format!("definition of `{}`", &source[name_span.clone()]).into(),
+                        name_span,
+                        format!("definition of `{}`", &source[name_span]).into(),
                     )],
                     notes: vec![],
                 }
             }
-            Error::MissingType(ref name_span) => ParseError {
-                message: format!("variable `{}` needs a type", &source[name_span.clone()]),
+            Error::MissingType(name_span) => ParseError {
+                message: format!("variable `{}` needs a type", &source[name_span]),
                 labels: vec![(
-                    name_span.clone(),
-                    format!("definition of `{}`", &source[name_span.clone()]).into(),
+                    name_span,
+                    format!("definition of `{}`", &source[name_span]).into(),
                 )],
                 notes: vec![],
             },
-            Error::MissingAttribute(name, ref name_span) => ParseError {
+            Error::MissingAttribute(name, name_span) => ParseError {
                 message: format!(
                     "variable `{}` needs a '{}' attribute",
-                    &source[name_span.clone()],
-                    name
+                    &source[name_span], name
                 ),
                 labels: vec![(
-                    name_span.clone(),
-                    format!("definition of `{}`", &source[name_span.clone()]).into(),
+                    name_span,
+                    format!("definition of `{}`", &source[name_span]).into(),
                 )],
                 notes: vec![],
             },
-            Error::InvalidAtomicPointer(ref span) => ParseError {
+            Error::InvalidAtomicPointer(span) => ParseError {
                 message: "atomic operation is done on a pointer to a non-atomic".to_string(),
-                labels: vec![(span.clone(), "atomic pointer is invalid".into())],
+                labels: vec![(span, "atomic pointer is invalid".into())],
                 notes: vec![],
             },
-            Error::InvalidAtomicOperandType(ref span) => ParseError {
+            Error::InvalidAtomicOperandType(span) => ParseError {
                 message: "atomic operand type is inconsistent with the operation".to_string(),
-                labels: vec![(span.clone(), "atomic operand type is invalid".into())],
+                labels: vec![(span, "atomic operand type is invalid".into())],
                 notes: vec![],
             },
-            Error::NotPointer(ref span) => ParseError {
+            Error::NotPointer(span) => ParseError {
                 message: "the operand of the `*` operator must be a pointer".to_string(),
-                labels: vec![(span.clone(), "expression is not a pointer".into())],
+                labels: vec![(span, "expression is not a pointer".into())],
                 notes: vec![],
             },
-            Error::NotReference(what, ref span) => ParseError {
+            Error::NotReference(what, span) => ParseError {
                 message: format!("{} must be a reference", what),
-                labels: vec![(span.clone(), "expression is not a reference".into())],
+                labels: vec![(span, "expression is not a reference".into())],
                 notes: vec![],
             },
-            Error::InvalidAssignment { ref span, ty } => ParseError {
+            Error::InvalidAssignment { span, ty } => ParseError {
                 message: "invalid left-hand side of assignment".into(),
-                labels: vec![(span.clone(), "cannot assign to this expression".into())],
+                labels: vec![(span, "cannot assign to this expression".into())],
                 notes: match ty {
                     InvalidAssignmentType::Swizzle => vec![
                         "WGSL does not support assignments to swizzles".into(),
                         "consider assigning each component individually".into(),
                     ],
                     InvalidAssignmentType::ImmutableBinding => vec![
-                        format!("'{}' is an immutable binding", &source[span.clone()]),
+                        format!("'{}' is an immutable binding", &source[span]),
                         "consider declaring it with `var` instead of `let`".into(),
                     ],
                     InvalidAssignmentType::Other => vec![],
                 },
             },
-            Error::Pointer(what, ref span) => ParseError {
+            Error::Pointer(what, span) => ParseError {
                 message: format!("{} must not be a pointer", what),
-                labels: vec![(span.clone(), "expression is a pointer".into())],
+                labels: vec![(span, "expression is a pointer".into())],
                 notes: vec![],
             },
-            Error::ReservedKeyword(ref name_span) => ParseError {
-                message: format!(
-                    "name `{}` is a reserved keyword",
-                    &source[name_span.clone()]
-                ),
+            Error::ReservedKeyword(name_span) => ParseError {
+                message: format!("name `{}` is a reserved keyword", &source[name_span]),
                 labels: vec![(
-                    name_span.clone(),
-                    format!("definition of `{}`", &source[name_span.clone()]).into(),
+                    name_span,
+                    format!("definition of `{}`", &source[name_span]).into(),
                 )],
                 notes: vec![],
             },
-            Error::Redefinition {
-                ref previous,
-                ref current,
-            } => ParseError {
-                message: format!("redefinition of `{}`", &source[current.clone()]),
+            Error::Redefinition { previous, current } => ParseError {
+                message: format!("redefinition of `{}`", &source[current]),
                 labels: vec![
                     (
-                        current.clone(),
-                        format!("redefinition of `{}`", &source[current.clone()]).into(),
+                        current,
+                        format!("redefinition of `{}`", &source[current]).into(),
                     ),
                     (
-                        previous.clone(),
-                        format!("previous definition of `{}`", &source[previous.clone()]).into(),
+                        previous,
+                        format!("previous definition of `{}`", &source[previous]).into(),
                     ),
                 ],
                 notes: vec![],
             },
-            Error::RecursiveDeclaration {
-                ref ident,
-                ref usage,
-            } => ParseError {
-                message: format!("declaration of `{}` is recursive", &source[ident.clone()]),
-                labels: vec![
-                    (ident.clone(), "".into()),
-                    (usage.clone(), "uses itself here".into()),
-                ],
+            Error::RecursiveDeclaration { ident, usage } => ParseError {
+                message: format!("declaration of `{}` is recursive", &source[ident]),
+                labels: vec![(ident, "".into()), (usage, "uses itself here".into())],
                 notes: vec![],
             },
-            Error::CyclicDeclaration {
-                ref ident,
-                ref path,
-            } => ParseError {
-                message: format!("declaration of `{}` is cyclic", &source[ident.clone()]),
+            Error::CyclicDeclaration { ident, ref path } => ParseError {
+                message: format!("declaration of `{}` is cyclic", &source[ident]),
                 labels: path
                     .iter()
                     .enumerate()
-                    .flat_map(|(i, &(ref ident, ref usage))| {
+                    .flat_map(|(i, &(ident, usage))| {
                         [
-                            (ident.clone(), "".into()),
+                            (ident, "".into()),
                             (
-                                usage.clone(),
+                                usage,
                                 if i == path.len() - 1 {
                                     "ending the cycle".into()
                                 } else {
-                                    format!("uses `{}`", &source[ident.clone()]).into()
+                                    format!("uses `{}`", &source[ident]).into()
                                 },
                             ),
                         ]
@@ -619,15 +570,15 @@ impl<'a> Error<'a> {
                     .collect(),
                 notes: vec![],
             },
-            Error::ConstExprUnsupported(ref span) => ParseError {
+            Error::ConstExprUnsupported(span) => ParseError {
                 message: "this constant expression is not supported".to_string(),
-                labels: vec![(span.clone(), "expression is not supported".into())],
+                labels: vec![(span, "expression is not supported".into())],
                 notes: vec!["this should be fixed in a future version of Naga".into()],
             },
-            Error::InvalidSwitchValue { uint, ref span } => ParseError {
+            Error::InvalidSwitchValue { uint, span } => ParseError {
                 message: "invalid switch value".to_string(),
                 labels: vec![(
-                    span.clone(),
+                    span,
                     if uint {
                         "expected unsigned integer"
                     } else {
@@ -636,24 +587,22 @@ impl<'a> Error<'a> {
                     .into(),
                 )],
                 notes: vec![if uint {
-                    format!(
-                        "suffix the integer with a `u`: '{}u'",
-                        &source[span.clone()]
-                    )
+                    format!("suffix the integer with a `u`: '{}u'", &source[span])
                 } else {
+                    let span = span.to_range().unwrap();
                     format!(
                         "remove the `u` suffix: '{}'",
                         &source[span.start..span.end - 1]
                     )
                 }],
             },
-            Error::CalledEntryPoint(ref span) => ParseError {
+            Error::CalledEntryPoint(span) => ParseError {
                 message: "entry point cannot be called".to_string(),
-                labels: vec![(span.clone(), "entry point cannot be called".into())],
+                labels: vec![(span, "entry point cannot be called".into())],
                 notes: vec![],
             },
             Error::WrongArgumentCount {
-                ref span,
+                span,
                 ref expected,
                 found,
             } => ParseError {
@@ -666,12 +615,12 @@ impl<'a> Error<'a> {
                     },
                     found
                 ),
-                labels: vec![(span.clone(), "wrong number of arguments".into())],
+                labels: vec![(span, "wrong number of arguments".into())],
                 notes: vec![],
             },
-            Error::FunctionReturnsVoid(ref span) => ParseError {
+            Error::FunctionReturnsVoid(span) => ParseError {
                 message: "function does not return any value".to_string(),
-                labels: vec![(span.clone(), "".into())],
+                labels: vec![(span, "".into())],
                 notes: vec![
                     "perhaps you meant to call the function in a separate statement?".into(),
                 ],
@@ -999,16 +948,15 @@ impl<'a> ParseExpressionContext<'a, '_, '_> {
             ParseExpressionContext<'a, '_, '_>,
         ) -> Result<Handle<ast::Expression<'a>>, Error<'a>>,
     ) -> Result<Handle<ast::Expression<'a>>, Error<'a>> {
-        let start = lexer.start_byte_offset() as u32;
+        let start = lexer.start_byte_offset();
         let mut accumulator = parser(lexer, self.reborrow())?;
         while let Some(op) = classifier(lexer.peek().0) {
             let _ = lexer.next();
             let left = accumulator;
             let right = parser(lexer, self.reborrow())?;
-            let end = lexer.end_byte_offset() as u32;
             accumulator = self.expressions.append(
                 ast::Expression::Binary { op, left, right },
-                NagaSpan::new(start, end),
+                lexer.span_from(start),
             );
         }
         Ok(accumulator)
@@ -1035,7 +983,7 @@ impl<'source> OutputContext<'source, '_, '_> {
     fn ensure_type_exists(&mut self, inner: crate::TypeInner) -> Handle<crate::Type> {
         self.module
             .types
-            .insert(crate::Type { inner, name: None }, NagaSpan::UNDEFINED)
+            .insert(crate::Type { inner, name: None }, Span::UNDEFINED)
     }
 }
 
@@ -1149,7 +1097,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     fn prepare_sampling(
         &mut self,
         image: Handle<crate::Expression>,
-        span: NagaSpan,
+        span: Span,
     ) -> Result<SamplingContext, Error<'a>> {
         Ok(SamplingContext {
             image,
@@ -1157,7 +1105,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
                 let ty = self.resolve_type(image)?;
                 match self.module.types[ty].inner {
                     crate::TypeInner::Image { arrayed, .. } => arrayed,
-                    _ => return Err(Error::BadTexture(span.to_range().unwrap())),
+                    _ => return Err(Error::BadTexture(span)),
                 }
             },
         })
@@ -1167,14 +1115,14 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         &mut self,
         args: &'b [Handle<ast::Expression<'a>>],
         min_args: u32,
-        span: NagaSpan,
+        span: Span,
     ) -> ArgumentContext<'b, 'a> {
         ArgumentContext {
             args: args.iter(),
             min_args,
             args_used: 0,
             total_args: args.len() as u32,
-            span: span.to_range().unwrap(),
+            span,
         }
     }
 
@@ -1223,7 +1171,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     fn interrupt_emitter(
         &mut self,
         expression: crate::Expression,
-        span: NagaSpan,
+        span: Span,
     ) -> Handle<crate::Expression> {
         self.block.extend(self.emitter.finish(self.expressions));
         let result = self.expressions.append(expression, span);
@@ -1322,7 +1270,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
                 specialization: None,
                 inner,
             },
-            NagaSpan::default(),
+            Span::UNDEFINED,
         );
         Some(constant)
     }
@@ -1376,7 +1324,7 @@ impl<'source> ArgumentContext<'_, 'source> {
             None => Err(Error::WrongArgumentCount {
                 found: self.total_args,
                 expected: self.min_args..self.args_used + 1,
-                span: self.span.clone(),
+                span: self.span,
             }),
         }
     }
@@ -1426,30 +1374,26 @@ impl Composition {
         }
     }
 
-    fn extract_impl(name: &str, name_span: NagaSpan) -> Result<u32, Error> {
-        let ch = name
-            .chars()
-            .next()
-            .ok_or_else(|| Error::BadAccessor(name_span.to_range().unwrap()))?;
+    fn extract_impl(name: &str, name_span: Span) -> Result<u32, Error> {
+        let ch = name.chars().next().ok_or(Error::BadAccessor(name_span))?;
         match Self::letter_component(ch) {
             Some(sc) => Ok(sc as u32),
-            None => Err(Error::BadAccessor(name_span.to_range().unwrap())),
+            None => Err(Error::BadAccessor(name_span)),
         }
     }
 
-    fn make(name: &str, name_span: NagaSpan) -> Result<Self, Error> {
+    fn make(name: &str, name_span: Span) -> Result<Self, Error> {
         if name.len() > 1 {
             let mut components = [crate::SwizzleComponent::X; 4];
             for (comp, ch) in components.iter_mut().zip(name.chars()) {
-                *comp = Self::letter_component(ch)
-                    .ok_or_else(|| Error::BadAccessor(name_span.to_range().unwrap()))?;
+                *comp = Self::letter_component(ch).ok_or(Error::BadAccessor(name_span))?;
             }
 
             let size = match name.len() {
                 2 => crate::VectorSize::Bi,
                 3 => crate::VectorSize::Tri,
                 4 => crate::VectorSize::Quad,
-                _ => return Err(Error::BadAccessor(name_span.to_range().unwrap())),
+                _ => return Err(Error::BadAccessor(name_span)),
             };
             Ok(Composition::Multi(size, components))
         } else {
@@ -1580,7 +1524,7 @@ impl ParseError {
     pub fn labels(&self) -> impl Iterator<Item = (Span, &str)> + ExactSizeIterator + '_ {
         self.labels
             .iter()
-            .map(|&(ref span, ref msg)| (span.clone(), msg.as_ref()))
+            .map(|&(span, ref msg)| (span, msg.as_ref()))
     }
 
     pub fn message(&self) -> &str {
@@ -1594,7 +1538,8 @@ impl ParseError {
                 self.labels
                     .iter()
                     .map(|label| {
-                        Label::primary((), label.0.clone()).with_message(label.1.to_string())
+                        Label::primary((), label.0.to_range().unwrap())
+                            .with_message(label.1.to_string())
                     })
                     .collect(),
             )
@@ -1637,9 +1582,7 @@ impl ParseError {
 
     /// Returns a [`SourceLocation`] for the first label in the error message.
     pub fn location(&self, source: &str) -> Option<SourceLocation> {
-        self.labels
-            .get(0)
-            .map(|label| NagaSpan::new(label.0.start as u32, label.0.end as u32).location(source))
+        self.labels.get(0).map(|label| label.0.location(source))
     }
 }
 
@@ -1914,7 +1857,7 @@ impl Parser {
             }
         };
 
-        let span = NagaSpan::from(self.peek_rule_span(lexer));
+        let span = self.peek_rule_span(lexer);
         let expr = ctx.expressions.append(expr, span);
         Ok(expr)
     }
@@ -1969,14 +1912,12 @@ impl Parser {
                 let start = lexer.start_byte_offset();
                 let _ = lexer.next();
 
-                if let Some(ty) =
-                    self.parse_constructor_type(lexer, word, span.clone(), ctx.reborrow())?
-                {
-                    let end = lexer.end_byte_offset();
+                if let Some(ty) = self.parse_constructor_type(lexer, word, span, ctx.reborrow())? {
+                    let ty_span = lexer.span_from(start);
                     let components = self.parse_arguments(lexer, ctx.reborrow())?;
                     ast::Expression::Construct {
                         ty,
-                        ty_span: start..end,
+                        ty_span,
                         components,
                     }
                 } else if let Token::Paren('(') = lexer.peek().0 {
@@ -1994,7 +1935,7 @@ impl Parser {
         };
 
         let span = self.pop_rule_span(lexer);
-        let expr = ctx.expressions.append(expr, NagaSpan::from(span));
+        let expr = ctx.expressions.append(expr, span);
         Ok(expr)
     }
 
@@ -2032,7 +1973,7 @@ impl Parser {
             };
 
             let span = lexer.span_from(span_start);
-            expr = ctx.expressions.append(expression, NagaSpan::from(span));
+            expr = ctx.expressions.append(expression, span);
         }
 
         Ok(expr)
@@ -2054,7 +1995,7 @@ impl Parser {
                     op: crate::UnaryOperator::Negate,
                     expr,
                 };
-                let span = NagaSpan::from(self.peek_rule_span(lexer));
+                let span = self.peek_rule_span(lexer);
                 ctx.expressions.append(expr, span)
             }
             Token::Operation('!' | '~') => {
@@ -2064,21 +2005,21 @@ impl Parser {
                     op: crate::UnaryOperator::Not,
                     expr,
                 };
-                let span = NagaSpan::from(self.peek_rule_span(lexer));
+                let span = self.peek_rule_span(lexer);
                 ctx.expressions.append(expr, span)
             }
             Token::Operation('*') => {
                 let _ = lexer.next();
                 let expr = self.parse_unary_expression(lexer, ctx.reborrow())?;
                 let expr = ast::Expression::Deref(expr);
-                let span = NagaSpan::from(self.peek_rule_span(lexer));
+                let span = self.peek_rule_span(lexer);
                 ctx.expressions.append(expr, span)
             }
             Token::Operation('&') => {
                 let _ = lexer.next();
                 let expr = self.parse_unary_expression(lexer, ctx.reborrow())?;
                 let expr = ast::Expression::AddrOf(expr);
-                let span = NagaSpan::from(self.peek_rule_span(lexer));
+                let span = self.peek_rule_span(lexer);
                 ctx.expressions.append(expr, span)
             }
             _ => self.parse_singular_expression(lexer, ctx.reborrow())?,
@@ -2712,20 +2653,15 @@ impl Parser {
         &mut self,
         lexer: &mut Lexer<'a>,
         name: &'a str,
-        name_span: Span,
+        span: Span,
         attribute: TypeAttributes,
         ctx: ParseExpressionContext<'a, '_, '_>,
     ) -> Result<ast::Type<'a>, Error<'a>> {
-        let span = name_span.start..lexer.end_byte_offset();
-
         Ok(
             match self.parse_type_decl_impl(lexer, attribute, name, ctx)? {
                 Some(kind) => ast::Type { kind, span },
                 None => ast::Type {
-                    kind: ast::TypeKind::User(ast::Ident {
-                        name,
-                        span: name_span,
-                    }),
+                    kind: ast::TypeKind::User(ast::Ident { name, span }),
                     span,
                 },
             },
@@ -2745,8 +2681,8 @@ impl Parser {
             return Err(Error::Unexpected(other.1, ExpectedToken::TypeAttribute));
         }
 
-        let (name, name_span) = lexer.next_ident_with_span()?;
-        let ty = self.parse_type_decl_name(lexer, name, name_span, attribute, ctx)?;
+        let (name, span) = lexer.next_ident_with_span()?;
+        let ty = self.parse_type_decl_name(lexer, name, span, attribute, ctx)?;
         self.pop_rule_span(lexer);
 
         Ok(ty)
@@ -2804,20 +2740,20 @@ impl Parser {
                     _ => unreachable!(),
                 };
 
-                let span_end = lexer.end_byte_offset();
+                let span = lexer.span_from(span_start);
                 block.stmts.push(ast::Statement {
                     kind: op(target),
-                    span: span_start..span_end,
+                    span,
                 });
                 return Ok(());
             }
             other => return Err(Error::Unexpected(other.1, ExpectedToken::SwitchItem)),
         };
 
-        let span_end = lexer.end_byte_offset();
+        let span = lexer.span_from(span_start);
         block.stmts.push(ast::Statement {
             kind: ast::StatementKind::Assign { target, op, value },
-            span: span_start..span_end,
+            span,
         });
         Ok(())
     }
@@ -2841,6 +2777,7 @@ impl Parser {
         lexer: &mut Lexer<'a>,
         ident: &'a str,
         ident_span: Span,
+        span_start: usize,
         mut context: ParseExpressionContext<'a, '_, 'out>,
         block: &'out mut ast::Block<'a>,
     ) -> Result<(), Error<'a>> {
@@ -2848,20 +2785,20 @@ impl Parser {
 
         context.unresolved.insert(ast::Dependency {
             ident,
-            usage: ident_span.clone(),
+            usage: ident_span,
         });
         let arguments = self.parse_arguments(lexer, context.reborrow())?;
-        let span_end = lexer.end_byte_offset();
+        let span = lexer.span_from(span_start);
 
         block.stmts.push(ast::Statement {
             kind: ast::StatementKind::Call {
                 function: ast::Ident {
                     name: ident,
-                    span: ident_span.clone(),
+                    span: ident_span,
                 },
                 arguments,
             },
-            span: ident_span.start..span_end,
+            span,
         });
 
         self.pop_rule_span(lexer);
@@ -2875,15 +2812,21 @@ impl Parser {
         mut context: ParseExpressionContext<'a, '_, 'out>,
         block: &'out mut ast::Block<'a>,
     ) -> Result<(), Error<'a>> {
+        let span_start = lexer.start_byte_offset();
         match lexer.peek() {
             (Token::Word(name), span) => {
                 // A little hack for 2 token lookahead.
                 let cloned = lexer.clone();
                 let _ = lexer.next();
                 match lexer.peek() {
-                    (Token::Paren('('), _) => {
-                        self.parse_function_statement(lexer, name, span, context.reborrow(), block)
-                    }
+                    (Token::Paren('('), _) => self.parse_function_statement(
+                        lexer,
+                        name,
+                        span,
+                        span_start,
+                        context.reborrow(),
+                        block,
+                    ),
                     _ => {
                         *lexer = cloned;
                         self.parse_assignment_statement(lexer, context.reborrow(), block)
@@ -2971,12 +2914,10 @@ impl Parser {
                         let expr_id = self.parse_general_expression(lexer, ctx.reborrow())?;
                         lexer.expect(Token::Separator(';'))?;
 
-                        let handle = ctx
-                            .locals
-                            .append(ast::Local, NagaSpan::from(name_span.clone()));
+                        let handle = ctx.locals.append(ast::Local, name_span);
                         if let Some(old) = ctx.local_table.add(name, handle) {
                             return Err(Error::Redefinition {
-                                previous: ctx.locals.get_span(old).to_range().unwrap(),
+                                previous: ctx.locals.get_span(old),
                                 current: name_span,
                             });
                         }
@@ -3014,12 +2955,10 @@ impl Parser {
 
                         lexer.expect(Token::Separator(';'))?;
 
-                        let handle = ctx
-                            .locals
-                            .append(ast::Local, NagaSpan::from(name_span.clone()));
+                        let handle = ctx.locals.append(ast::Local, name_span);
                         if let Some(old) = ctx.local_table.add(name, handle) {
                             return Err(Error::Redefinition {
-                                previous: ctx.locals.get_span(old).to_range().unwrap(),
+                                previous: ctx.locals.get_span(old),
                                 current: name_span,
                             });
                         }
@@ -3073,7 +3012,6 @@ impl Parser {
                             elseif_span_start = lexer.start_byte_offset();
                         };
 
-                        let span_end = lexer.end_byte_offset();
                         // reverse-fold the else-if blocks
                         //Note: we may consider uplifting this to the IR
                         for (other_span_start, other_cond, other_block) in
@@ -3085,9 +3023,10 @@ impl Parser {
                                 reject,
                             };
                             reject = ast::Block::default();
+                            let span = lexer.span_from(other_span_start);
                             reject.stmts.push(ast::Statement {
                                 kind: sub_stmt,
-                                span: other_span_start..span_end,
+                                span,
                             })
                         }
 
@@ -3172,7 +3111,7 @@ impl Parser {
                         let mut reject = ast::Block::default();
                         reject.stmts.push(ast::Statement {
                             kind: ast::StatementKind::Break,
-                            span: span.clone(),
+                            span,
                         });
 
                         body.stmts.push(ast::Statement {
@@ -3231,7 +3170,7 @@ impl Parser {
                             let mut reject = ast::Block::default();
                             reject.stmts.push(ast::Statement {
                                 kind: ast::StatementKind::Break,
-                                span: span.clone(),
+                                span,
                             });
                             body.stmts.push(ast::Statement {
                                 kind: ast::StatementKind::If {
@@ -3271,13 +3210,13 @@ impl Parser {
                         }
                     }
                     "break" => {
-                        let (_, mut span) = lexer.next();
+                        let (_, span) = lexer.next();
                         // Check if the next token is an `if`, this indicates
                         // that the user tried to type out a `break if` which
                         // is illegal in this position.
                         let (peeked_token, peeked_span) = lexer.peek();
                         if let Token::Word("if") = peeked_token {
-                            span.end = peeked_span.end;
+                            let span = span.until(&peeked_span);
                             return Err(Error::InvalidBreakIf(span));
                         }
                         ast::StatementKind::Break
@@ -3468,7 +3407,7 @@ impl Parser {
                 return Err(Error::ReservedKeyword(param_name.span));
             }
 
-            let handle = locals.append(ast::Local, param_name.span.clone().into());
+            let handle = locals.append(ast::Local, param_name.span);
             local_table.add(param_name.name, handle);
             arguments.push(ast::FunctionArgument {
                 name: param_name,
@@ -3773,7 +3712,7 @@ impl Parser {
         };
 
         if let Some((decl, span)) = decl {
-            out.decls.append(decl, span.into());
+            out.decls.append(decl, span);
         }
 
         match binding {
@@ -3952,7 +3891,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             });
 
                             return Err(Error::InitializationTypeMismatch(
-                                c.name.span.clone(),
+                                c.name.span,
                                 explicit,
                                 inferred,
                             ));
@@ -3995,7 +3934,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn lower_fn(
         &mut self,
         f: &ast::Function<'source>,
-        span: NagaSpan,
+        span: Span,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<GlobalDecl, Error<'source>> {
         let mut local_table = FastHashMap::default();
@@ -4009,10 +3948,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .enumerate()
             .map(|(i, arg)| {
                 let ty = self.resolve_type(&arg.ty, ctx.reborrow())?;
-                let expr = expressions.append(
-                    crate::Expression::FunctionArgument(i as u32),
-                    arg.name.span.clone().into(),
-                );
+                let expr = expressions
+                    .append(crate::Expression::FunctionArgument(i as u32), arg.name.span);
                 local_table.insert(arg.handle, TypedExpression::non_reference(expr));
                 named_expressions.insert(expr, arg.name.name.to_string());
 
@@ -4134,7 +4071,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             .equivalent(&ctx.module.types[init_ty].inner, &ctx.module.types)
                         {
                             return Err(Error::InitializationTypeMismatch(
-                                l.name.span.clone(),
+                                l.name.span,
                                 ctx.fmt_ty(ty),
                                 ctx.fmt_ty(init_ty),
                             ));
@@ -4189,7 +4126,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 .equivalent(&ctx.module.types[inferred].inner, &ctx.module.types)
                             {
                                 return Err(Error::InitializationTypeMismatch(
-                                    v.name.span.clone(),
+                                    v.name.span,
                                     ctx.fmt_ty(explicit),
                                     ctx.fmt_ty(inferred),
                                 ));
@@ -4199,7 +4136,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         (Some(explicit), None) => explicit,
                         (None, Some(inferred)) => inferred,
                         (None, None) => {
-                            return Err(Error::MissingType(v.name.span.clone()));
+                            return Err(Error::MissingType(v.name.span));
                         }
                     };
 
@@ -4209,13 +4146,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             ty,
                             init: None,
                         },
-                        stmt.span.clone().into(),
+                        stmt.span,
                     );
 
-                    let handle = ctx.as_expression(block, &mut emitter).interrupt_emitter(
-                        crate::Expression::LocalVariable(var),
-                        NagaSpan::UNDEFINED,
-                    );
+                    let handle = ctx
+                        .as_expression(block, &mut emitter)
+                        .interrupt_emitter(crate::Expression::LocalVariable(var), Span::UNDEFINED);
                     block.extend(emitter.finish(ctx.expressions));
                     ctx.local_table.insert(
                         v.handle,
@@ -4285,7 +4221,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 _ => {
                                     return Err(Error::InvalidSwitchValue {
                                         uint,
-                                        span: case.value_span.clone(),
+                                        span: case.value_span,
                                     });
                                 }
                             },
@@ -4340,7 +4276,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 emitter.start(ctx.expressions);
 
                 let _ = self.call(
-                    stmt.span.clone().into(),
+                    stmt.span,
                     function,
                     arguments,
                     ctx.as_expression(block, &mut emitter),
@@ -4370,7 +4306,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     };
 
                     return Err(Error::InvalidAssignment {
-                        span: ctx.read_expressions.get_span(target).to_range().unwrap(),
+                        span: ctx.read_expressions.get_span(target),
                         ty,
                     });
                 }
@@ -4386,7 +4322,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 left,
                                 right: value,
                             },
-                            NagaSpan::from(stmt.span.clone()),
+                            stmt.span,
                         )
                     }
                     None => value,
@@ -4408,7 +4344,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     _ => unreachable!(),
                 };
 
-                let value_span = ctx.read_expressions.get_span(value).to_range().unwrap();
+                let value_span = ctx.read_expressions.get_span(value);
                 let reference = self.lower_expression_for_reference(
                     value,
                     ctx.as_expression(block, &mut emitter),
@@ -4443,21 +4379,20 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         specialization: None,
                         inner: constant_inner,
                     },
-                    NagaSpan::UNDEFINED,
+                    Span::UNDEFINED,
                 );
 
                 let left = ectx.expressions.append(
                     crate::Expression::Load {
                         pointer: reference.handle,
                     },
-                    value_span.into(),
+                    value_span,
                 );
-                let right = ectx
-                    .interrupt_emitter(crate::Expression::Constant(constant), NagaSpan::UNDEFINED);
-                let value = ectx.expressions.append(
-                    crate::Expression::Binary { op, left, right },
-                    stmt.span.clone().into(),
-                );
+                let right =
+                    ectx.interrupt_emitter(crate::Expression::Constant(constant), Span::UNDEFINED);
+                let value = ectx
+                    .expressions
+                    .append(crate::Expression::Binary { op, left, right }, stmt.span);
 
                 block.extend(emitter.finish(ctx.expressions));
                 crate::Statement::Store {
@@ -4475,7 +4410,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
         };
 
-        block.push(out, NagaSpan::from(stmt.span.clone()));
+        block.push(out, stmt.span);
 
         Ok(())
     }
@@ -4526,7 +4461,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         specialization: None,
                         inner,
                     },
-                    NagaSpan::UNDEFINED,
+                    Span::UNDEFINED,
                 );
                 let handle = ctx.interrupt_emitter(crate::Expression::Constant(handle), span);
                 return Ok(TypedExpression::non_reference(handle));
@@ -4544,10 +4479,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         ),
                         GlobalDecl::Const(handle) => (crate::Expression::Constant(handle), false),
                         _ => {
-                            return Err(Error::Unexpected(
-                                span.to_range().unwrap(),
-                                ExpectedToken::Variable,
-                            ));
+                            return Err(Error::Unexpected(span, ExpectedToken::Variable));
                         }
                     };
 
@@ -4557,16 +4489,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         is_reference,
                     })
                 } else {
-                    Err(Error::UnknownIdent(span.to_range().unwrap(), name))
+                    Err(Error::UnknownIdent(span, name))
                 }
             }
             ast::Expression::Construct {
                 ref ty,
-                ref ty_span,
+                ty_span,
                 ref components,
             } => {
-                let handle =
-                    self.construct(span, ty, ty_span.clone(), components, ctx.reborrow())?;
+                let handle = self.construct(span, ty, ty_span, components, ctx.reborrow())?;
                 return Ok(TypedExpression::non_reference(handle));
             }
             ast::Expression::Unary { op, expr } => {
@@ -4578,10 +4509,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 // reference is required, the Load Rule is not applied.
                 let expr = self.lower_expression_for_reference(expr, ctx.reborrow())?;
                 if !expr.is_reference {
-                    return Err(Error::NotReference(
-                        "the operand of the `&` operator",
-                        span.to_range().unwrap(),
-                    ));
+                    return Err(Error::NotReference("the operand of the `&` operator", span));
                 }
 
                 // No code is generated. We just declare the pointer a reference now.
@@ -4596,7 +4524,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                 let ty = ctx.resolve_type(pointer)?;
                 if ctx.module.types[ty].inner.pointer_space().is_none() {
-                    return Err(Error::NotPointer(span.to_range().unwrap()));
+                    return Err(Error::NotPointer(span));
                 }
 
                 return Ok(TypedExpression {
@@ -4617,7 +4545,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => {
                 let handle = self
                     .call(span, function, arguments, ctx.reborrow())?
-                    .ok_or_else(|| Error::FunctionReturnsVoid(function.span.clone()))?;
+                    .ok_or(Error::FunctionReturnsVoid(function.span))?;
                 return Ok(TypedExpression::non_reference(handle));
             }
             ast::Expression::Index { base, index } => {
@@ -4631,12 +4559,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 if wgsl_pointer {
                     return Err(Error::Pointer(
                         "the value indexed by a `[]` subscripting expression",
-                        ctx.read_expressions.get_span(base).to_range().unwrap(),
+                        ctx.read_expressions.get_span(base),
                     ));
                 }
 
                 if let crate::Expression::Constant(constant) = ctx.expressions[index] {
-                    let span = ctx.expressions.get_span(index).to_range().unwrap();
+                    let span = ctx.expressions.get_span(index);
                     let index = match ctx.module.constants[constant].inner {
                         crate::ConstantInner::Scalar {
                             value: crate::ScalarValue::Uint(int),
@@ -4702,7 +4630,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 if wgsl_pointer {
                     return Err(Error::Pointer(
                         "the value accessed by a `.member` expression",
-                        ctx.read_expressions.get_span(base).to_range().unwrap(),
+                        ctx.read_expressions.get_span(base),
                     ));
                 }
 
@@ -4711,7 +4639,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         let index = members
                             .iter()
                             .position(|m| m.name.as_deref() == Some(field.name))
-                            .ok_or_else(|| Error::BadAccessor(field.span.clone()))?
+                            .ok_or(Error::BadAccessor(field.span))?
                             as u32;
 
                         (
@@ -4723,7 +4651,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         )
                     }
                     crate::TypeInner::Vector { .. } | crate::TypeInner::Matrix { .. } => {
-                        match Composition::make(field.name, NagaSpan::from(field.span.clone()))? {
+                        match Composition::make(field.name, field.span)? {
                             Composition::Multi(size, pattern) => {
                                 let vector = ctx.apply_load_rule(TypedExpression {
                                     handle,
@@ -4748,7 +4676,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             ),
                         }
                     }
-                    _ => return Err(Error::BadAccessor(field.span.clone())),
+                    _ => return Err(Error::BadAccessor(field.span)),
                 };
 
                 access
@@ -4772,7 +4700,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         let ty = ctx.resolve_type(expr)?;
                         return Err(Error::BadTypeCast {
                             from_type: ctx.fmt_ty(ty),
-                            span: to.span.clone(),
+                            span: to.span,
                             to_type: ctx.fmt_ty(to_resolved),
                         });
                     }
@@ -4798,7 +4726,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn call(
         &mut self,
-        span: NagaSpan,
+        span: Span,
         function: &ast::Ident<'source>,
         arguments: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
@@ -4808,17 +4736,16 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let handle = self.construct(
                     span,
                     &ast::ConstructorType::Type(ty),
-                    function.span.clone(),
+                    function.span,
                     arguments,
                     ctx.reborrow(),
                 )?;
                 Ok(Some(handle))
             }
-            Some(&GlobalDecl::Const(_) | &GlobalDecl::Var(_)) => Err(Error::Unexpected(
-                function.span.clone(),
-                ExpectedToken::Function,
-            )),
-            Some(&GlobalDecl::EntryPoint) => Err(Error::CalledEntryPoint(function.span.clone())),
+            Some(&GlobalDecl::Const(_) | &GlobalDecl::Var(_)) => {
+                Err(Error::Unexpected(function.span, ExpectedToken::Function))
+            }
+            Some(&GlobalDecl::EntryPoint) => Err(Error::CalledEntryPoint(function.span)),
             Some(&GlobalDecl::Function(function)) => {
                 let arguments = arguments
                     .iter()
@@ -4843,7 +4770,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 Ok(result)
             }
             None => {
-                let span = function.span.clone().into();
+                let span = function.span;
                 let expr = if let Some(fun) = conv::map_relational_fun(function.name) {
                     let mut args = ctx.prepare_args(arguments, 1, span);
                     let argument = self.lower_expression(args.next()?, ctx.reborrow())?;
@@ -5015,11 +4942,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                         comparison: false,
                                     }
                                 }
-                                _ => {
-                                    return Err(Error::InvalidAtomicOperandType(
-                                        value_span.to_range().unwrap(),
-                                    ))
-                                }
+                                _ => return Err(Error::InvalidAtomicOperandType(value_span)),
                             };
 
                             let result = ctx.interrupt_emitter(expression, span);
@@ -5054,13 +4977,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 3, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5086,15 +5008,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 3, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5135,15 +5056,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 5, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5186,15 +5106,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 5, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5237,15 +5156,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 6, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5289,15 +5207,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 5, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5340,15 +5257,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 5, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5401,15 +5317,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 };
 
                             let image = image_or_component;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5450,15 +5365,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 4, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span.into())?;
+                            let sc = ctx.prepare_sampling(image, image_span)?;
                             let array_index = if sc.arrayed {
                                 Some(self.lower_expression(args.next()?, ctx.reborrow())?)
                             } else {
@@ -5501,8 +5415,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let mut args = ctx.prepare_args(arguments, 3, span);
 
                             let image = args.next()?;
-                            let image_span =
-                                ctx.read_expressions.get_span(image).to_range().unwrap();
+                            let image_span = ctx.read_expressions.get_span(image);
                             let image = self.lower_expression(image, ctx.reborrow())?;
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
@@ -5581,7 +5494,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 query: crate::ImageQuery::NumSamples,
                             }
                         }
-                        _ => return Err(Error::UnknownIdent(function.span.clone(), function.name)),
+                        _ => return Err(Error::UnknownIdent(function.span, function.name)),
                     }
                 };
 
@@ -5596,7 +5509,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         expr: Handle<ast::Expression<'source>>,
         mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
-        let span = ctx.read_expressions.get_span(expr).to_range().unwrap();
+        let span = ctx.read_expressions.get_span(expr);
         let pointer = self.lower_expression(expr, ctx.reborrow())?;
 
         let ty = ctx.resolve_type(pointer)?;
@@ -5617,7 +5530,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn atomic_helper(
         &mut self,
-        span: NagaSpan,
+        span: Span,
         fun: crate::AtomicFunction,
         args: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
@@ -5640,11 +5553,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 width,
                 comparison: false,
             },
-            _ => {
-                return Err(Error::InvalidAtomicOperandType(
-                    value_span.to_range().unwrap(),
-                ))
-            }
+            _ => return Err(Error::InvalidAtomicOperandType(value_span)),
         };
 
         let result = ctx.interrupt_emitter(expression, span);
@@ -5695,7 +5604,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ..
             } => i,
             _ => {
-                return Err(Error::InvalidGatherComponent(span.to_range().unwrap()));
+                return Err(Error::InvalidGatherComponent(span));
             }
         };
 
@@ -5703,13 +5612,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .get(int as usize)
             .copied()
             .map(Some)
-            .ok_or_else(|| Error::InvalidGatherComponent(span.to_range().unwrap()))
+            .ok_or(Error::InvalidGatherComponent(span))
     }
 
     fn lower_struct(
         &mut self,
         s: &ast::Struct<'source>,
-        span: NagaSpan,
+        span: Span,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
         let mut offset = 0;
@@ -5726,7 +5635,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             let member_min_size = self.layouter[ty].size;
             let member_min_alignment = self.layouter[ty].alignment;
 
-            let member_size = if let Some((size, span)) = member.size.clone() {
+            let member_size = if let Some((size, span)) = member.size {
                 if size < member_min_size {
                     return Err(Error::SizeAttributeTooLow(span, member_min_size));
                 } else {
@@ -5736,7 +5645,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 member_min_size
             };
 
-            let member_alignment = if let Some((align, span)) = member.align.clone() {
+            let member_alignment = if let Some((align, span)) = member.align {
                 if let Some(alignment) = Alignment::new(align) {
                     if alignment < member_min_alignment {
                         return Err(Error::AlignAttributeTooLow(span, member_min_alignment));
@@ -5860,8 +5769,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             ast::TypeKind::User(ref ident) => {
                 return match ctx.globals.get(ident.name) {
                     Some(&GlobalDecl::Type(handle)) => Ok(handle),
-                    Some(_) => Err(Error::Unexpected(ident.span.clone(), ExpectedToken::Type)),
-                    None => Err(Error::UnknownType(ident.span.clone())),
+                    Some(_) => Err(Error::Unexpected(ident.span, ExpectedToken::Type)),
+                    None => Err(Error::UnknownType(ident.span)),
                 }
             }
         };
@@ -5872,7 +5781,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn constant(
         &mut self,
         expr: &ast::Expression<'source>,
-        expr_span: NagaSpan,
+        expr_span: Span,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Constant>, Error<'source>> {
         let inner = match self.constant_inner(expr, expr_span, ctx.reborrow())? {
@@ -5886,7 +5795,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 specialization: None,
                 inner,
             },
-            NagaSpan::UNDEFINED,
+            Span::UNDEFINED,
         );
         Ok(c)
     }
@@ -5894,10 +5803,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn constant_inner(
         &mut self,
         expr: &ast::Expression<'source>,
-        expr_span: NagaSpan,
+        expr_span: Span,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<ConstantOrInner, Error<'source>> {
-        let span = expr_span.to_range().unwrap();
+        let span = expr_span;
 
         let inner = match *expr {
             ast::Expression::Literal(literal) => match literal {
@@ -5950,7 +5859,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     ctx.reborrow(),
                 )?,
                 Some(_) => return Err(Error::ConstExprUnsupported(span)),
-                None => return Err(Error::UnknownIdent(function.span.clone(), function.name)),
+                None => return Err(Error::UnknownIdent(function.span, function.name)),
             },
             _ => return Err(Error::ConstExprUnsupported(span)),
         };

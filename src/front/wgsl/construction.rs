@@ -1,4 +1,4 @@
-use crate::{Handle, Span as NagaSpan};
+use crate::{Handle, Span};
 
 use super::{ast, Error, ExpressionContext, Lowerer, OutputContext};
 
@@ -58,12 +58,12 @@ enum ComponentsHandle {
     None,
     One {
         component: Handle<crate::Expression>,
-        span: NagaSpan,
+        span: Span,
         ty: Handle<crate::Type>,
     },
     Many {
         components: Vec<Handle<crate::Expression>>,
-        spans: Vec<NagaSpan>,
+        spans: Vec<Span>,
         first_component_ty: Handle<crate::Type>,
     },
 }
@@ -99,13 +99,13 @@ enum Components<'a> {
     None,
     One {
         component: Handle<crate::Expression>,
-        span: NagaSpan,
+        span: Span,
         ty: Handle<crate::Type>,
         ty_inner: &'a crate::TypeInner,
     },
     Many {
         components: Vec<Handle<crate::Expression>>,
-        spans: Vec<NagaSpan>,
+        spans: Vec<Span>,
         first_component_ty_inner: &'a crate::TypeInner,
     },
 }
@@ -123,9 +123,9 @@ impl Components<'_> {
 impl<'source, 'temp> Lowerer<'source, 'temp> {
     pub(super) fn construct(
         &mut self,
-        span: NagaSpan,
+        span: Span,
         constructor: &ast::ConstructorType<'source>,
-        c_span: super::Span,
+        ty_span: Span,
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
@@ -182,14 +182,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             (Components::None, dst_ty) => {
                 let ty = match dst_ty {
                     ConcreteConstructor::Type(ty, _) => ty,
-                    _ => return Err(Error::TypeNotInferrable(c_span)),
+                    _ => return Err(Error::TypeNotInferrable(ty_span)),
                 };
 
                 return match ctx.create_zero_value_constant(ty) {
                     Some(constant) => {
                         Ok(ctx.interrupt_emitter(crate::Expression::Constant(constant), span))
                     }
-                    None => Err(Error::TypeNotConstructible(c_span)),
+                    None => Err(Error::TypeNotConstructible(ty_span)),
                 };
             }
 
@@ -459,9 +459,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let inner = crate::TypeInner::Array {
                     base,
                     size: crate::ArraySize::Constant(
-                        ctx.module
-                            .constants
-                            .fetch_or_append(size, NagaSpan::UNDEFINED),
+                        ctx.module.constants.fetch_or_append(size, Span::UNDEFINED),
                     ),
                     stride: {
                         self.layouter
@@ -500,7 +498,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             ) => {
                 let from_type = ctx.fmt_ty(src_ty);
                 return Err(Error::BadTypeCast {
-                    span: span.to_range().unwrap(),
+                    span,
                     from_type,
                     to_type: constructor_h.to_error_string(ctx.reborrow()),
                 });
@@ -511,10 +509,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 Components::Many { spans, .. },
                 ConcreteConstructor::Type(_, &crate::TypeInner::Scalar { .. }),
             ) => {
-                return Err(Error::UnexpectedComponents(super::Span {
-                    start: spans[1].to_range().unwrap().start,
-                    end: spans.last().unwrap().to_range().unwrap().end,
-                }));
+                let span = spans[1].until(spans.last().unwrap());
+                return Err(Error::UnexpectedComponents(span));
             }
 
             // Parameters are of the wrong type for vector or matrix constructor
@@ -527,14 +523,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 | ConcreteConstructor::PartialVector { .. }
                 | ConcreteConstructor::PartialMatrix { .. },
             ) => {
-                return Err(Error::InvalidConstructorComponentType(
-                    spans[0].to_range().unwrap(),
-                    0,
-                ));
+                return Err(Error::InvalidConstructorComponentType(spans[0], 0));
             }
 
             // Other types can't be constructed
-            _ => return Err(Error::TypeNotConstructible(c_span)),
+            _ => return Err(Error::TypeNotConstructible(ty_span)),
         };
 
         let expr = ctx.expressions.append(expr, span);
@@ -543,7 +536,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     pub(super) fn const_construct(
         &mut self,
-        span: NagaSpan,
+        span: Span,
         constructor: &ast::ConstructorType<'source>,
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: OutputContext<'source, '_, '_>,
@@ -567,7 +560,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                 crate::ConstantInner::Composite { ty, components }
             }
-            _ => return Err(Error::ConstExprUnsupported(span.to_range().unwrap())),
+            _ => return Err(Error::ConstExprUnsupported(span)),
         };
         Ok(c)
     }

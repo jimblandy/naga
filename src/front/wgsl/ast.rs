@@ -1,6 +1,5 @@
-use crate::front::wgsl::number::Number;
-use crate::front::wgsl::Span;
-use crate::{Arena, FastHashSet, Handle};
+use super::Number;
+use crate::{Arena, FastHashSet, Handle, Span};
 use std::hash::Hash;
 
 #[derive(Debug, Default)]
