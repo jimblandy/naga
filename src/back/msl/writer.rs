@@ -1442,7 +1442,7 @@ impl<W: Write> Writer<W> {
                         if offset.is_none() && !is_cube_map {
                             write!(self.out, ", {}::int2(0)", NAMESPACE)?;
                         }
-                        let letter = ['x', 'y', 'z', 'w'][component as usize];
+                        let letter = back::COMPONENTS[component as usize];
                         write!(self.out, ", {}::component::{}", NAMESPACE, letter)?;
                     }
                 }
@@ -1500,8 +1500,9 @@ impl<W: Write> Writer<W> {
                         _ => return Err(Error::Validation),
                     },
                 };
-                write!(self.out, "{}", op_str)?;
+                write!(self.out, "{}(", op_str)?;
                 self.put_expression(expr, context, false)?;
+                write!(self.out, ")")?;
             }
             crate::Expression::Binary { op, left, right } => {
                 let op_str = crate::back::binary_operation_str(op);

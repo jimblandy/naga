@@ -253,6 +253,16 @@ fn assignment() {
     return;
 }
 
+fn negation_avoids_prefix_decrement() {
+    _ = -(-2);
+    _ = -(-3);
+    _ = -(-(4));
+    _ = -(-(-5));
+    _ = -(-(-(-(6))));
+    _ = -(-(-(-(-7))));
+    _ = -(-(-(-(-8))));
+}
+
 @compute @workgroup_size(1, 1, 1) 
 fn main() {
     let _e0 = builtins();
