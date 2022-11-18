@@ -129,13 +129,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
-        let mut octx = OutputContext {
-            read_expressions: None,
-            global_expressions: ctx.global_expressions,
-            globals: ctx.globals,
-            module: ctx.module,
-        };
-        let constructor_h = self.constructor(constructor, octx.reborrow())?;
+        let constructor_h = self.constructor(constructor, ctx.as_output())?;
 
         let components_h = match *components {
             [] => ComponentsHandle::None,
@@ -554,7 +548,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             Some(arena) => arena,
                             None => ctx.global_expressions,
                         };
-                        self.constant(&arena[expr], arena.get_span(expr), ctx.reborrow())
+                        self.constant(expr, arena, ctx.reborrow())
                     })
                     .collect::<Result<_, _>>()?;
 
@@ -599,15 +593,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
             ast::ConstructorType::PartialArray => ConcreteConstructorHandle::PartialArray,
             ast::ConstructorType::Array { ref base, size } => {
-                let base = self.resolve_type(base, ctx.reborrow())?;
-                let size = match size {
-                    ast::ArraySize::Constant(expr) => {
-                        let span = ctx.global_expressions.get_span(expr);
-                        let expr = &ctx.global_expressions[expr];
-                        crate::ArraySize::Constant(self.constant(expr, span, ctx.reborrow())?)
-                    }
-                    ast::ArraySize::Dynamic => crate::ArraySize::Dynamic,
-                };
+                let base = self.resolve_ast_type(base, ctx.reborrow())?;
+                let size =
+                    match size {
+                        ast::ArraySize::Constant(expr) => crate::ArraySize::Constant(
+                            self.constant(expr, ctx.global_expressions, ctx.reborrow())?,
+                        ),
+                        ast::ArraySize::Dynamic => crate::ArraySize::Dynamic,
+                    };
 
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)

@@ -939,6 +939,19 @@ impl<'a> ParseExpressionContext<'a, '_, '_> {
         }
     }
 
+    fn global_expr_as_expr(&mut self) -> ParseExpressionContext<'a, '_, '_> {
+        ParseExpressionContext {
+            expressions: match self.global_expressions.as_deref_mut() {
+                Some(x) => x,
+                None => self.expressions,
+            },
+            global_expressions: None,
+            local_table: self.local_table,
+            locals: self.locals,
+            unresolved: self.unresolved,
+        }
+    }
+
     fn parse_binary_op(
         &mut self,
         lexer: &mut Lexer<'a>,
@@ -1038,6 +1051,15 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
             emitter,
         }
     }
+
+    fn as_output(&mut self) -> OutputContext<'a, '_, '_> {
+        OutputContext {
+            read_expressions: Some(self.read_expressions),
+            global_expressions: self.global_expressions,
+            globals: self.globals,
+            module: self.module,
+        }
+    }
 }
 
 struct SamplingContext {
@@ -1073,6 +1095,15 @@ impl<'a> ExpressionContext<'a, '_, '_> {
             arguments: self.arguments,
             block: self.block,
             emitter: self.emitter,
+        }
+    }
+
+    fn as_output(&mut self) -> OutputContext<'a, '_, '_> {
+        OutputContext {
+            read_expressions: Some(self.read_expressions),
+            global_expressions: self.global_expressions,
+            globals: self.globals,
+            module: self.module,
         }
     }
 
@@ -1284,13 +1315,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     }
 
     fn ensure_type_exists(&mut self, inner: crate::TypeInner) -> Handle<crate::Type> {
-        OutputContext {
-            read_expressions: None,
-            global_expressions: self.global_expressions,
-            globals: self.globals,
-            module: self.module,
-        }
-        .ensure_type_exists(inner)
+        self.as_output().ensure_type_exists(inner)
     }
 }
 
@@ -1774,17 +1799,7 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let expr = self.parse_unary_expression(
-                        lexer,
-                        ParseExpressionContext {
-                            expressions: match ctx.global_expressions {
-                                Some(x) => x,
-                                None => ctx.expressions,
-                            },
-                            global_expressions: None,
-                            ..ctx
-                        },
-                    )?;
+                    let expr = self.parse_unary_expression(lexer, ctx.global_expr_as_expr())?;
                     ast::ArraySize::Constant(expr)
                 } else {
                     ast::ArraySize::Dynamic
@@ -2198,11 +2213,11 @@ impl Parser {
     fn parse_variable_ident_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        mut ctx: ParseExpressionContext<'a, '_, '_>,
+        ctx: ParseExpressionContext<'a, '_, '_>,
     ) -> Result<(ast::Ident<'a>, ast::Type<'a>), Error<'a>> {
         let (name, span) = lexer.next_ident_with_span()?;
         lexer.expect(Token::Separator(':'))?;
-        let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
+        let ty = self.parse_type_decl(lexer, ctx)?;
         Ok((ast::Ident { name, span }, ty))
     }
 
@@ -2435,17 +2450,7 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let size = self.parse_unary_expression(
-                        lexer,
-                        ParseExpressionContext {
-                            expressions: match ctx.global_expressions {
-                                Some(x) => x,
-                                None => ctx.expressions,
-                            },
-                            global_expressions: None,
-                            ..ctx
-                        },
-                    )?;
+                    let size = self.parse_unary_expression(lexer, ctx.global_expr_as_expr())?;
                     ast::ArraySize::Constant(size)
                 } else {
                     ast::ArraySize::Dynamic
@@ -2461,17 +2466,7 @@ impl Parser {
                 lexer.expect_generic_paren('<')?;
                 let base = self.parse_type_decl(lexer, ctx.reborrow())?;
                 let size = if lexer.skip(Token::Separator(',')) {
-                    let size = self.parse_unary_expression(
-                        lexer,
-                        ParseExpressionContext {
-                            expressions: match ctx.global_expressions {
-                                Some(x) => x,
-                                None => ctx.expressions,
-                            },
-                            global_expressions: None,
-                            ..ctx
-                        },
-                    )?;
+                    let size = self.parse_unary_expression(lexer, ctx.global_expr_as_expr())?;
                     ast::ArraySize::Constant(size)
                 } else {
                     ast::ArraySize::Dynamic
@@ -3378,8 +3373,16 @@ impl Parser {
             return Err(Error::ReservedKeyword(span));
         }
 
+        let mut expressions = Arena::new();
         let mut locals = Arena::new();
-        let mut local_table = super::SymbolTable::default();
+
+        let mut ctx = ParseExpressionContext {
+            expressions: &mut expressions,
+            global_expressions: Some(&mut out.global_expressions),
+            local_table: &mut super::SymbolTable::default(),
+            locals: &mut locals,
+            unresolved: dependencies,
+        };
 
         // read parameter list
         let mut arguments = Vec::new();
@@ -3393,22 +3396,13 @@ impl Parser {
                 ));
             }
             let binding = self.parse_varying_binding(lexer)?;
-            let (param_name, param_type) = self.parse_variable_ident_decl(
-                lexer,
-                ParseExpressionContext {
-                    expressions: &mut out.global_expressions,
-                    global_expressions: None,
-                    local_table: &mut super::SymbolTable::default(),
-                    locals: &mut locals,
-                    unresolved: dependencies,
-                },
-            )?;
+            let (param_name, param_type) = self.parse_variable_ident_decl(lexer, ctx.reborrow())?;
             if crate::keywords::wgsl::RESERVED.contains(&param_name.name) {
                 return Err(Error::ReservedKeyword(param_name.span));
             }
 
-            let handle = locals.append(ast::Local, param_name.span);
-            local_table.add(param_name.name, handle);
+            let handle = ctx.locals.append(ast::Local, param_name.span);
+            ctx.local_table.add(param_name.name, handle);
             arguments.push(ast::FunctionArgument {
                 name: param_name,
                 ty: param_type,
@@ -3420,35 +3414,14 @@ impl Parser {
         // read return type
         let result = if lexer.skip(Token::Arrow) && !lexer.skip(Token::Word("void")) {
             let binding = self.parse_varying_binding(lexer)?;
-            let ty = self.parse_type_decl(
-                lexer,
-                ParseExpressionContext {
-                    expressions: &mut out.global_expressions,
-                    global_expressions: None,
-                    local_table: &mut local_table,
-                    locals: &mut locals,
-                    unresolved: dependencies,
-                },
-            )?;
+            let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
             Some(ast::FunctionResult { ty, binding })
         } else {
             None
         };
 
-        let mut expressions = Arena::new();
         // read body
-        let body = self
-            .parse_block(
-                lexer,
-                ParseExpressionContext {
-                    expressions: &mut expressions,
-                    global_expressions: Some(&mut out.global_expressions),
-                    local_table: &mut local_table,
-                    locals: &mut locals,
-                    unresolved: dependencies,
-                },
-            )?
-            .0;
+        let body = self.parse_block(lexer, ctx)?.0;
 
         let fun = ast::Function {
             entry_point: None,
@@ -3549,64 +3522,38 @@ impl Parser {
         }
 
         let mut dependencies = FastHashSet::default();
+        let mut ctx = ParseExpressionContext {
+            expressions: &mut out.global_expressions,
+            global_expressions: None,
+            local_table: &mut super::SymbolTable::default(),
+            locals: &mut Arena::new(),
+            unresolved: &mut dependencies,
+        };
 
         // read item
         let start = lexer.start_byte_offset();
-        let decl = match lexer.next() {
+        let kind = match lexer.next() {
             (Token::Separator(';'), _) => None,
             (Token::Word("struct"), _) => {
                 let (name, span) = lexer.next_ident_with_span()?;
                 if crate::keywords::wgsl::RESERVED.contains(&name) {
                     return Err(Error::ReservedKeyword(span));
                 }
-                let members = self.parse_struct_body(
-                    lexer,
-                    ParseExpressionContext {
-                        expressions: &mut out.global_expressions,
-                        global_expressions: None,
-                        local_table: &mut super::SymbolTable::default(),
-                        locals: &mut Arena::new(),
-                        unresolved: &mut dependencies,
-                    },
-                )?;
-                let type_span = lexer.span_from(start);
-                Some((
-                    ast::GlobalDecl {
-                        kind: ast::GlobalDeclKind::Struct(ast::Struct {
-                            name: ast::Ident { name, span },
-                            members,
-                        }),
-                        dependencies,
-                    },
-                    type_span,
-                ))
+                let members = self.parse_struct_body(lexer, ctx)?;
+                Some(ast::GlobalDeclKind::Struct(ast::Struct {
+                    name: ast::Ident { name, span },
+                    members,
+                }))
             }
             (Token::Word("type"), _) => {
                 let (name, span) = lexer.next_ident_with_span()?;
                 lexer.expect(Token::Operation('='))?;
-                let ty = self.parse_type_decl(
-                    lexer,
-                    ParseExpressionContext {
-                        expressions: &mut out.global_expressions,
-                        global_expressions: None,
-                        local_table: &mut super::SymbolTable::default(),
-                        locals: &mut Arena::new(),
-                        unresolved: &mut dependencies,
-                    },
-                )?;
+                let ty = self.parse_type_decl(lexer, ctx)?;
                 lexer.expect(Token::Separator(';'))?;
-                let type_span = lexer.span_from(start);
-
-                Some((
-                    ast::GlobalDecl {
-                        kind: ast::GlobalDeclKind::Type(ast::TypeAlias {
-                            name: ast::Ident { name, span },
-                            ty,
-                        }),
-                        dependencies,
-                    },
-                    type_span,
-                ))
+                Some(ast::GlobalDeclKind::Type(ast::TypeAlias {
+                    name: ast::Ident { name, span },
+                    ty,
+                }))
             }
             (Token::Word("const"), _) => {
                 let (name, name_span) = lexer.next_ident_with_span()?;
@@ -3615,104 +3562,62 @@ impl Parser {
                 }
 
                 let ty = if lexer.skip(Token::Separator(':')) {
-                    let ty = self.parse_type_decl(
-                        lexer,
-                        ParseExpressionContext {
-                            expressions: &mut out.global_expressions,
-                            global_expressions: None,
-                            local_table: &mut super::SymbolTable::default(),
-                            locals: &mut Arena::new(),
-                            unresolved: &mut dependencies,
-                        },
-                    )?;
+                    let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
                     Some(ty)
                 } else {
                     None
                 };
 
                 lexer.expect(Token::Operation('='))?;
-                let init = self.parse_general_expression(
-                    lexer,
-                    ParseExpressionContext {
-                        expressions: &mut out.global_expressions,
-                        global_expressions: None,
-                        local_table: &mut super::SymbolTable::default(),
-                        locals: &mut Arena::new(),
-                        unresolved: &mut dependencies,
-                    },
-                )?;
+                let init = self.parse_general_expression(lexer, ctx)?;
                 lexer.expect(Token::Separator(';'))?;
 
-                Some((
-                    ast::GlobalDecl {
-                        kind: ast::GlobalDeclKind::Const(ast::Const {
-                            name: ast::Ident {
-                                name,
-                                span: name_span,
-                            },
-                            ty,
-                            init,
-                        }),
-                        dependencies,
+                Some(ast::GlobalDeclKind::Const(ast::Const {
+                    name: ast::Ident {
+                        name,
+                        span: name_span,
                     },
-                    lexer.span_from(start),
-                ))
+                    ty,
+                    init,
+                }))
             }
             (Token::Word("var"), _) => {
-                let pvar = self.parse_variable_decl(
-                    lexer,
-                    ParseExpressionContext {
-                        expressions: &mut out.global_expressions,
-                        global_expressions: None,
-                        local_table: &mut super::SymbolTable::default(),
-                        locals: &mut Arena::new(),
-                        unresolved: &mut dependencies,
-                    },
-                )?;
+                let pvar = self.parse_variable_decl(lexer, ctx)?;
                 if crate::keywords::wgsl::RESERVED.contains(&pvar.name) {
                     return Err(Error::ReservedKeyword(pvar.name_span));
                 }
 
-                Some((
-                    ast::GlobalDecl {
-                        kind: ast::GlobalDeclKind::Var(ast::GlobalVariable {
-                            name: ast::Ident {
-                                name: pvar.name,
-                                span: pvar.name_span,
-                            },
-                            space: pvar.space.unwrap_or(crate::AddressSpace::Handle),
-                            binding: binding.take(),
-                            ty: pvar.ty,
-                            init: pvar.init,
-                        }),
-                        dependencies,
+                Some(ast::GlobalDeclKind::Var(ast::GlobalVariable {
+                    name: ast::Ident {
+                        name: pvar.name,
+                        span: pvar.name_span,
                     },
-                    lexer.span_from(start),
-                ))
+                    space: pvar.space.unwrap_or(crate::AddressSpace::Handle),
+                    binding: binding.take(),
+                    ty: pvar.ty,
+                    init: pvar.init,
+                }))
             }
             (Token::Word("fn"), _) => {
                 let function = self.parse_function_decl(lexer, out, &mut dependencies)?;
-                Some((
-                    ast::GlobalDecl {
-                        kind: ast::GlobalDeclKind::Fn(ast::Function {
-                            entry_point: stage.map(|stage| ast::EntryPoint {
-                                stage,
-                                early_depth_test,
-                                workgroup_size,
-                            }),
-                            ..function
-                        }),
-                        dependencies,
-                    },
-                    lexer.span_from(start),
-                ))
+                Some(ast::GlobalDeclKind::Fn(ast::Function {
+                    entry_point: stage.map(|stage| ast::EntryPoint {
+                        stage,
+                        early_depth_test,
+                        workgroup_size,
+                    }),
+                    ..function
+                }))
             }
             (Token::End, _) => return Ok(false),
             other => return Err(Error::Unexpected(other.1, ExpectedToken::GlobalItem)),
         };
 
-        if let Some((decl, span)) = decl {
-            out.decls.append(decl, span);
+        if let Some(kind) = kind {
+            out.decls.append(
+                ast::GlobalDecl { kind, dependencies },
+                lexer.span_from(start),
+            );
         }
 
         match binding {
@@ -3782,7 +3687,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         tu: &'temp ast::TranslationUnit<'source>,
     ) -> Result<crate::Module, Error<'source>> {
         let mut module = crate::Module::default();
-        let mut globals = FastHashMap::default();
+
+        let mut ctx = OutputContext {
+            read_expressions: None,
+            global_expressions: &tu.global_expressions,
+            globals: &mut FastHashMap::default(),
+            module: &mut module,
+        };
 
         for decl in self.index.visit_ordered() {
             let span = tu.decls.get_span(decl);
@@ -3790,37 +3701,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
             match decl.kind {
                 ast::GlobalDeclKind::Fn(ref f) => {
-                    let decl = self.lower_fn(
-                        f,
-                        span,
-                        OutputContext {
-                            read_expressions: None,
-                            global_expressions: &tu.global_expressions,
-                            globals: &mut globals,
-                            module: &mut module,
-                        },
-                    )?;
-                    globals.insert(f.name.name, decl);
+                    let decl = self.lower_fn(f, span, ctx.reborrow())?;
+                    ctx.globals.insert(f.name.name, decl);
                 }
                 ast::GlobalDeclKind::Var(ref v) => {
-                    let mut ctx = OutputContext {
-                        read_expressions: None,
-                        global_expressions: &tu.global_expressions,
-                        globals: &mut globals,
-                        module: &mut module,
-                    };
-
-                    let ty = self.resolve_type(&v.ty, ctx.reborrow())?;
+                    let ty = self.resolve_ast_type(&v.ty, ctx.reborrow())?;
 
                     let init = v
                         .init
-                        .map(|init| {
-                            self.constant(
-                                &ctx.global_expressions[init],
-                                ctx.global_expressions.get_span(init),
-                                ctx.reborrow(),
-                            )
-                        })
+                        .map(|init| self.constant(init, ctx.global_expressions, ctx.reborrow()))
                         .transpose()?;
 
                     let handle = ctx.module.global_variables.append(
@@ -3834,21 +3723,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         span,
                     );
 
-                    globals.insert(v.name.name, GlobalDecl::Var(handle));
+                    ctx.globals.insert(v.name.name, GlobalDecl::Var(handle));
                 }
                 ast::GlobalDeclKind::Const(ref c) => {
-                    let mut ctx = OutputContext {
-                        read_expressions: None,
-                        global_expressions: &tu.global_expressions,
-                        globals: &mut globals,
-                        module: &mut module,
-                    };
-
-                    let inner = self.constant_inner(
-                        &ctx.global_expressions[c.init],
-                        ctx.global_expressions.get_span(c.init),
-                        ctx.reborrow(),
-                    )?;
+                    let inner =
+                        self.constant_inner(c.init, ctx.global_expressions, ctx.reborrow())?;
                     let inner = match inner {
                         ConstantOrInner::Constant(c) => ctx.module.constants[c].inner.clone(),
                         ConstantOrInner::Inner(inner) => inner,
@@ -3864,7 +3743,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         crate::ConstantInner::Composite { ty, .. } => ty,
                     };
 
-                    let handle = ctx.module.constants.append(
+                    let handle = ctx.module.constants.fetch_or_append(
                         crate::Constant {
                             name: Some(c.name.name.to_string()),
                             specialization: None,
@@ -3875,7 +3754,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     let explicit_ty =
                         c.ty.as_ref()
-                            .map(|ty| self.resolve_type(ty, ctx.reborrow()))
+                            .map(|ty| self.resolve_ast_type(ty, ctx.reborrow()))
                             .transpose()?;
 
                     if let Some(explicit) = explicit_ty {
@@ -3898,32 +3777,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         }
                     }
 
-                    globals.insert(c.name.name, GlobalDecl::Const(handle));
+                    ctx.globals.insert(c.name.name, GlobalDecl::Const(handle));
                 }
                 ast::GlobalDeclKind::Struct(ref s) => {
-                    let handle = self.lower_struct(
-                        s,
-                        span,
-                        OutputContext {
-                            read_expressions: None,
-                            global_expressions: &tu.global_expressions,
-                            globals: &mut globals,
-                            module: &mut module,
-                        },
-                    )?;
-                    globals.insert(s.name.name, GlobalDecl::Type(handle));
+                    let handle = self.lower_struct(s, span, ctx.reborrow())?;
+                    ctx.globals.insert(s.name.name, GlobalDecl::Type(handle));
                 }
                 ast::GlobalDeclKind::Type(ref alias) => {
-                    let ty = self.resolve_type(
-                        &alias.ty,
-                        OutputContext {
-                            read_expressions: None,
-                            global_expressions: &tu.global_expressions,
-                            globals: &mut globals,
-                            module: &mut module,
-                        },
-                    )?;
-                    globals.insert(alias.name.name, GlobalDecl::Type(ty));
+                    let ty = self.resolve_ast_type(&alias.ty, ctx.reborrow())?;
+                    ctx.globals.insert(alias.name.name, GlobalDecl::Type(ty));
                 }
             }
         }
@@ -3947,7 +3809,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .iter()
             .enumerate()
             .map(|(i, arg)| {
-                let ty = self.resolve_type(&arg.ty, ctx.reborrow())?;
+                let ty = self.resolve_ast_type(&arg.ty, ctx.reborrow())?;
                 let expr = expressions
                     .append(crate::Expression::FunctionArgument(i as u32), arg.name.span);
                 local_table.insert(arg.handle, TypedExpression::non_reference(expr));
@@ -3965,7 +3827,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .result
             .as_ref()
             .map(|res| {
-                self.resolve_type(&res.ty, ctx.reborrow())
+                self.resolve_ast_type(&res.ty, ctx.reborrow())
                     .map(|ty| crate::FunctionResult {
                         ty,
                         binding: self.interpolate_default(&res.binding, ty, ctx.reborrow()),
@@ -4050,17 +3912,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     let explicit_ty =
                         l.ty.as_ref()
-                            .map(|ty| {
-                                self.resolve_type(
-                                    ty,
-                                    OutputContext {
-                                        read_expressions: None,
-                                        global_expressions: ctx.global_expressions,
-                                        globals: ctx.globals,
-                                        module: ctx.module,
-                                    },
-                                )
-                            })
+                            .map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
                             .transpose()?;
 
                     if let Some(ty) = explicit_ty {
@@ -4105,17 +3957,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     let explicit_ty =
                         v.ty.as_ref()
-                            .map(|ty| {
-                                self.resolve_type(
-                                    ty,
-                                    OutputContext {
-                                        read_expressions: None,
-                                        global_expressions: ctx.global_expressions,
-                                        globals: ctx.globals,
-                                        module: ctx.module,
-                                    },
-                                )
-                            })
+                            .map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
                             .transpose()?;
 
                     let ty = match (explicit_ty, inferred_ty) {
@@ -4373,7 +4215,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         _ => return Err(Error::BadIncrDecrReferenceType(value_span)),
                     },
                 };
-                let constant = ectx.module.constants.append(
+                let constant = ectx.module.constants.fetch_or_append(
                     crate::Constant {
                         name: None,
                         specialization: None,
@@ -4683,15 +4525,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
             ast::Expression::Bitcast { expr, ref to } => {
                 let expr = self.lower_expression(expr, ctx.reborrow())?;
-                let to_resolved = self.resolve_type(
-                    to,
-                    OutputContext {
-                        read_expressions: None,
-                        global_expressions: ctx.global_expressions,
-                        globals: ctx.globals,
-                        module: ctx.module,
-                    },
-                )?;
+                let to_resolved = self.resolve_ast_type(to, ctx.as_output())?;
 
                 let kind = match ctx.module.types[to_resolved].inner {
                     crate::TypeInner::Scalar { kind, .. } => kind,
@@ -5025,16 +4859,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5075,16 +4900,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5125,16 +4941,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5176,16 +4983,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5226,16 +5024,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5276,16 +5065,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5334,16 +5114,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5384,16 +5155,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let offset = args
                                 .next()
                                 .map(|arg| {
-                                    self.constant(
-                                        &ctx.read_expressions[arg],
-                                        ctx.read_expressions.get_span(arg),
-                                        OutputContext {
-                                            read_expressions: Some(ctx.read_expressions),
-                                            global_expressions: ctx.global_expressions,
-                                            globals: ctx.globals,
-                                            module: ctx.module,
-                                        },
-                                    )
+                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
                                 })
                                 .ok()
                                 .transpose()?;
@@ -5572,21 +5334,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn gather_component(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
-        ctx: ExpressionContext<'source, '_, '_>,
+        mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Option<crate::SwizzleComponent>, Error<'source>> {
         let span = ctx.read_expressions.get_span(expr);
 
         let constant = match self
-            .constant_inner(
-                &ctx.read_expressions[expr],
-                span,
-                OutputContext {
-                    read_expressions: Some(ctx.read_expressions),
-                    globals: ctx.globals,
-                    global_expressions: ctx.global_expressions,
-                    module: ctx.module,
-                },
-            )
+            .constant_inner(expr, ctx.read_expressions, ctx.as_output())
             .ok()
         {
             Some(ConstantOrInner::Constant(c)) => ctx.module.constants[c].inner.clone(),
@@ -5626,7 +5379,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let mut members = Vec::with_capacity(s.members.len());
 
         for member in s.members.iter() {
-            let ty = self.resolve_type(&member.ty, ctx.reborrow())?;
+            let ty = self.resolve_ast_type(&member.ty, ctx.reborrow())?;
 
             self.layouter
                 .update(&ctx.module.types, &ctx.module.constants)
@@ -5690,7 +5443,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         Ok(handle)
     }
 
-    fn resolve_type(
+    fn resolve_ast_type(
         &mut self,
         ty: &ast::Type<'source>,
         mut ctx: OutputContext<'source, '_, '_>,
@@ -5711,11 +5464,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             },
             ast::TypeKind::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
             ast::TypeKind::Pointer { ref base, space } => {
-                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
+                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
                 crate::TypeInner::Pointer { base, space }
             }
             ast::TypeKind::Array { ref base, size } => {
-                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
+                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)
                     .unwrap();
@@ -5724,12 +5477,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     base,
                     size: match size {
                         ast::ArraySize::Constant(constant) => {
-                            let expr = &ctx.global_expressions[constant];
-                            let constant = self.constant(
-                                expr,
-                                ctx.global_expressions.get_span(constant),
-                                ctx.reborrow(),
-                            )?;
+                            let constant =
+                                self.constant(constant, ctx.global_expressions, ctx.reborrow())?;
                             crate::ArraySize::Constant(constant)
                         }
                         ast::ArraySize::Dynamic => crate::ArraySize::Dynamic,
@@ -5748,18 +5497,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             },
             ast::TypeKind::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
             ast::TypeKind::BindingArray { ref base, size } => {
-                let base = self.resolve_type(base.as_ref(), ctx.reborrow())?;
+                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
 
                 crate::TypeInner::BindingArray {
                     base,
                     size: match size {
                         ast::ArraySize::Constant(constant) => {
-                            let expr = &ctx.global_expressions[constant];
-                            let constant = self.constant(
-                                expr,
-                                ctx.global_expressions.get_span(constant),
-                                ctx.reborrow(),
-                            )?;
+                            let constant =
+                                self.constant(constant, ctx.global_expressions, ctx.reborrow())?;
                             crate::ArraySize::Constant(constant)
                         }
                         ast::ArraySize::Dynamic => crate::ArraySize::Dynamic,
@@ -5780,11 +5525,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn constant(
         &mut self,
-        expr: &ast::Expression<'source>,
-        expr_span: Span,
+        expr: Handle<ast::Expression<'source>>,
+        arena: &Arena<ast::Expression<'source>>,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Constant>, Error<'source>> {
-        let inner = match self.constant_inner(expr, expr_span, ctx.reborrow())? {
+        let inner = match self.constant_inner(expr, arena, ctx.reborrow())? {
             ConstantOrInner::Constant(c) => return Ok(c),
             ConstantOrInner::Inner(inner) => inner,
         };
@@ -5802,13 +5547,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn constant_inner(
         &mut self,
-        expr: &ast::Expression<'source>,
-        expr_span: Span,
+        expr: Handle<ast::Expression<'source>>,
+        arena: &Arena<ast::Expression<'source>>,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<ConstantOrInner, Error<'source>> {
-        let span = expr_span;
-
-        let inner = match *expr {
+        let span = arena.get_span(expr);
+        let inner = match arena[expr] {
             ast::Expression::Literal(literal) => match literal {
                 ast::Literal::Number(Number::F32(f)) => crate::ConstantInner::Scalar {
                     width: 4,
@@ -5847,13 +5591,13 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ref ty,
                 ref components,
                 ..
-            } => self.const_construct(expr_span, ty, components, ctx.reborrow())?,
+            } => self.const_construct(span, ty, components, ctx.reborrow())?,
             ast::Expression::Call {
                 ref function,
                 ref arguments,
             } => match ctx.globals.get(function.name) {
                 Some(&GlobalDecl::Type(ty)) => self.const_construct(
-                    expr_span,
+                    span,
                     &ast::ConstructorType::Type(ty),
                     arguments,
                     ctx.reborrow(),
