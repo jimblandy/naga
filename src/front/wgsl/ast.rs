@@ -8,13 +8,13 @@ pub struct TranslationUnit<'a> {
     pub global_expressions: Arena<Expression<'a>>,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Ident<'a> {
     pub name: &'a str,
     pub span: Span,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub enum IdentExpr<'a> {
     Unresolved(&'a str),
     Local(Handle<Local>),

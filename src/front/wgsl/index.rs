@@ -11,7 +11,7 @@ impl<'a> Index<'a> {
 
         // Populate dependencies
         for (handle, decl) in tu.decls.iter() {
-            let ident = decl_ident(decl).clone();
+            let ident = decl_ident(decl);
             let name = ident.name;
             if let Some(old) = globals.insert(name, handle) {
                 return Err(Error::Redefinition {
@@ -132,12 +132,12 @@ impl<'a> DependencySolver<'a, '_> {
     }
 }
 
-fn decl_ident<'a>(decl: &ast::GlobalDecl<'a>) -> ast::Ident<'a> {
+const fn decl_ident<'a>(decl: &ast::GlobalDecl<'a>) -> ast::Ident<'a> {
     match decl.kind {
-        ast::GlobalDeclKind::Fn(ref f) => f.name.clone(),
-        ast::GlobalDeclKind::Var(ref v) => v.name.clone(),
-        ast::GlobalDeclKind::Const(ref c) => c.name.clone(),
-        ast::GlobalDeclKind::Struct(ref s) => s.name.clone(),
-        ast::GlobalDeclKind::Type(ref t) => t.name.clone(),
+        ast::GlobalDeclKind::Fn(ref f) => f.name,
+        ast::GlobalDeclKind::Var(ref v) => v.name,
+        ast::GlobalDeclKind::Const(ref c) => c.name,
+        ast::GlobalDeclKind::Struct(ref s) => s.name,
+        ast::GlobalDeclKind::Type(ref t) => t.name,
     }
 }
