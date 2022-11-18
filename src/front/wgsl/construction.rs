@@ -592,7 +592,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ConcreteConstructorHandle::Type(ty)
             }
             ast::ConstructorType::PartialArray => ConcreteConstructorHandle::PartialArray,
-            ast::ConstructorType::Array { ref base, size } => {
+            ast::ConstructorType::Array { base, size } => {
                 let base = self.resolve_ast_type(base, ctx.reborrow())?;
                 let size =
                     match size {

@@ -920,6 +920,7 @@ impl crate::ScalarKind {
 struct ParseExpressionContext<'input, 'temp, 'out> {
     expressions: &'out mut Arena<ast::Expression<'input>>,
     global_expressions: Option<&'out mut Arena<ast::Expression<'input>>>,
+    types: &'out mut Arena<ast::Type<'input>>,
     local_table: &'temp mut super::SymbolTable<&'input str, Handle<ast::Local>>,
     locals: &'out mut Arena<ast::Local>,
     unresolved: &'out mut FastHashSet<ast::Dependency<'input>>,
@@ -930,6 +931,7 @@ impl<'a> ParseExpressionContext<'a, '_, '_> {
         ParseExpressionContext {
             expressions: self.expressions,
             global_expressions: self.global_expressions.as_deref_mut(),
+            types: self.types,
             local_table: self.local_table,
             locals: self.locals,
             unresolved: self.unresolved,
@@ -943,6 +945,7 @@ impl<'a> ParseExpressionContext<'a, '_, '_> {
                 None => self.expressions,
             },
             global_expressions: None,
+            types: self.types,
             local_table: self.local_table,
             locals: self.locals,
             unresolved: self.unresolved,
@@ -977,6 +980,7 @@ struct OutputContext<'source, 'temp, 'out> {
     read_expressions: Option<&'temp Arena<ast::Expression<'source>>>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
+    types: &'temp Arena<ast::Type<'source>>,
     module: &'out mut crate::Module,
 }
 
@@ -986,6 +990,7 @@ impl<'source> OutputContext<'source, '_, '_> {
             read_expressions: self.read_expressions,
             global_expressions: self.global_expressions,
             globals: self.globals,
+            types: self.types,
             module: self.module,
         }
     }
@@ -1001,6 +1006,7 @@ struct StatementContext<'source, 'temp, 'out> {
     local_table: &'temp mut FastHashMap<Handle<ast::Local>, TypedExpression>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
+    types: &'temp Arena<ast::Type<'source>>,
     read_expressions: &'temp Arena<ast::Expression<'source>>,
     typifier: &'temp mut super::Typifier,
     variables: &'out mut Arena<crate::LocalVariable>,
@@ -1016,6 +1022,7 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
             local_table: self.local_table,
             globals: self.globals,
             global_expressions: self.global_expressions,
+            types: self.types,
             read_expressions: self.read_expressions,
             typifier: self.typifier,
             variables: self.variables,
@@ -1038,6 +1045,7 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
             local_table: self.local_table,
             globals: self.globals,
             global_expressions: self.global_expressions,
+            types: self.types,
             read_expressions: self.read_expressions,
             typifier: self.typifier,
             expressions: self.expressions,
@@ -1054,6 +1062,7 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
             read_expressions: Some(self.read_expressions),
             global_expressions: self.global_expressions,
             globals: self.globals,
+            types: self.types,
             module: self.module,
         }
     }
@@ -1068,6 +1077,7 @@ struct ExpressionContext<'source, 'temp, 'out> {
     local_table: &'temp mut FastHashMap<Handle<ast::Local>, TypedExpression>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
+    types: &'temp Arena<ast::Type<'source>>,
     read_expressions: &'temp Arena<ast::Expression<'source>>,
     typifier: &'temp mut super::Typifier,
     expressions: &'out mut Arena<crate::Expression>,
@@ -1084,6 +1094,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
             local_table: self.local_table,
             globals: self.globals,
             global_expressions: self.global_expressions,
+            types: self.types,
             read_expressions: self.read_expressions,
             typifier: self.typifier,
             expressions: self.expressions,
@@ -1100,6 +1111,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
             read_expressions: Some(self.read_expressions),
             global_expressions: self.global_expressions,
             globals: self.globals,
+            types: self.types,
             module: self.module,
         }
     }
@@ -2406,10 +2418,7 @@ impl Parser {
                     };
                 }
                 lexer.expect_generic_paren('>')?;
-                ast::Type::Pointer {
-                    base: Box::new(base),
-                    space,
-                }
+                ast::Type::Pointer { base, space }
             }
             "array" => {
                 lexer.expect_generic_paren('<')?;
@@ -2422,10 +2431,7 @@ impl Parser {
                 };
                 lexer.expect_generic_paren('>')?;
 
-                ast::Type::Array {
-                    base: Box::new(base),
-                    size,
-                }
+                ast::Type::Array { base, size }
             }
             "binding_array" => {
                 lexer.expect_generic_paren('<')?;
@@ -2438,10 +2444,7 @@ impl Parser {
                 };
                 lexer.expect_generic_paren('>')?;
 
-                ast::Type::BindingArray {
-                    base: Box::new(base),
-                    size,
-                }
+                ast::Type::BindingArray { base, size }
             }
             "sampler" => ast::Type::Sampler { comparison: false },
             "sampler_comparison" => ast::Type::Sampler { comparison: true },
@@ -2612,20 +2615,21 @@ impl Parser {
     fn parse_type_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<ast::Type<'a>, Error<'a>> {
+        mut ctx: ParseExpressionContext<'a, '_, '_>,
+    ) -> Result<Handle<ast::Type<'a>>, Error<'a>> {
         self.push_rule_span(Rule::TypeDecl, lexer);
 
         let (name, span) = lexer.next_ident_with_span()?;
 
-        let ty = match self.parse_type_decl_impl(lexer, name, ctx)? {
+        let ty = match self.parse_type_decl_impl(lexer, name, ctx.reborrow())? {
             Some(ty) => ty,
             None => ast::Type::User(ast::Ident { name, span }),
         };
 
         self.pop_rule_span(lexer);
 
-        Ok(ty)
+        let handle = ctx.types.append(ty, Span::UNDEFINED);
+        Ok(handle)
     }
 
     fn parse_assignment_op_and_rhs<'a, 'out>(
@@ -2860,12 +2864,12 @@ impl Parser {
                             });
                         }
 
-                        ast::StatementKind::LocalDecl(Box::new(ast::LocalDecl::Let(ast::Let {
+                        ast::StatementKind::LocalDecl(ast::LocalDecl::Let(ast::Let {
                             name,
                             ty: given_ty,
                             init: expr_id,
                             handle,
-                        })))
+                        }))
                     }
                     "var" => {
                         let _ = lexer.next();
@@ -2895,14 +2899,12 @@ impl Parser {
                             });
                         }
 
-                        ast::StatementKind::LocalDecl(Box::new(ast::LocalDecl::Var(
-                            ast::LocalVariable {
-                                name,
-                                ty,
-                                init,
-                                handle,
-                            },
-                        )))
+                        ast::StatementKind::LocalDecl(ast::LocalDecl::Var(ast::LocalVariable {
+                            name,
+                            ty,
+                            init,
+                            handle,
+                        }))
                     }
                     "return" => {
                         let _ = lexer.next();
@@ -3312,6 +3314,7 @@ impl Parser {
             global_expressions: Some(&mut out.global_expressions),
             local_table: &mut super::SymbolTable::default(),
             locals: &mut locals,
+            types: &mut out.types,
             unresolved: dependencies,
         };
 
@@ -3456,6 +3459,7 @@ impl Parser {
             global_expressions: None,
             local_table: &mut super::SymbolTable::default(),
             locals: &mut Arena::new(),
+            types: &mut out.types,
             unresolved: &mut dependencies,
         };
 
@@ -3592,6 +3596,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             read_expressions: None,
             global_expressions: &tu.global_expressions,
             globals: &mut FastHashMap::default(),
+            types: &tu.types,
             module: &mut module,
         };
 
@@ -3605,7 +3610,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     ctx.globals.insert(f.name.name, decl);
                 }
                 ast::GlobalDeclKind::Var(ref v) => {
-                    let ty = self.resolve_ast_type(&v.ty, ctx.reborrow())?;
+                    let ty = self.resolve_ast_type(v.ty, ctx.reborrow())?;
 
                     let init = v
                         .init
@@ -3653,8 +3658,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     );
 
                     let explicit_ty =
-                        c.ty.as_ref()
-                            .map(|ty| self.resolve_ast_type(ty, ctx.reborrow()))
+                        c.ty.map(|ty| self.resolve_ast_type(ty, ctx.reborrow()))
                             .transpose()?;
 
                     if let Some(explicit) = explicit_ty {
@@ -3684,7 +3688,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     ctx.globals.insert(s.name.name, GlobalDecl::Type(handle));
                 }
                 ast::GlobalDeclKind::Type(ref alias) => {
-                    let ty = self.resolve_ast_type(&alias.ty, ctx.reborrow())?;
+                    let ty = self.resolve_ast_type(alias.ty, ctx.reborrow())?;
                     ctx.globals.insert(alias.name.name, GlobalDecl::Type(ty));
                 }
             }
@@ -3709,7 +3713,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .iter()
             .enumerate()
             .map(|(i, arg)| {
-                let ty = self.resolve_ast_type(&arg.ty, ctx.reborrow())?;
+                let ty = self.resolve_ast_type(arg.ty, ctx.reborrow())?;
                 let expr = expressions
                     .append(crate::Expression::FunctionArgument(i as u32), arg.name.span);
                 local_table.insert(arg.handle, TypedExpression::non_reference(expr));
@@ -3727,7 +3731,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             .result
             .as_ref()
             .map(|res| {
-                self.resolve_ast_type(&res.ty, ctx.reborrow())
+                self.resolve_ast_type(res.ty, ctx.reborrow())
                     .map(|ty| crate::FunctionResult {
                         ty,
                         binding: self.interpolate_default(&res.binding, ty, ctx.reborrow()),
@@ -3746,6 +3750,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 variables: &mut local_variables,
                 expressions: &mut expressions,
                 named_expressions: &mut named_expressions,
+                types: ctx.types,
                 module: ctx.module,
                 arguments: &arguments,
             },
@@ -3802,7 +3807,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let block = self.lower_block(block, ctx.reborrow())?;
                 crate::Statement::Block(block)
             }
-            ast::StatementKind::LocalDecl(ref decl) => match **decl {
+            ast::StatementKind::LocalDecl(ref decl) => match *decl {
                 ast::LocalDecl::Let(ref l) => {
                     let mut emitter = super::Emitter::default();
                     emitter.start(ctx.expressions);
@@ -3811,8 +3816,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         self.lower_expression(l.init, ctx.as_expression(block, &mut emitter))?;
 
                     let explicit_ty =
-                        l.ty.as_ref()
-                            .map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
+                        l.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
                             .transpose()?;
 
                     if let Some(ty) = explicit_ty {
@@ -3856,8 +3860,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         .transpose()?;
 
                     let explicit_ty =
-                        v.ty.as_ref()
-                            .map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
+                        v.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
                             .transpose()?;
 
                     let ty = match (explicit_ty, inferred_ty) {
@@ -4423,11 +4426,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                 access
             }
-            ast::Expression::Bitcast {
-                expr,
-                ref to,
-                ty_span,
-            } => {
+            ast::Expression::Bitcast { expr, to, ty_span } => {
                 let expr = self.lower_expression(expr, ctx.reborrow())?;
                 let to_resolved = self.resolve_ast_type(to, ctx.as_output())?;
 
@@ -5283,7 +5282,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let mut members = Vec::with_capacity(s.members.len());
 
         for member in s.members.iter() {
-            let ty = self.resolve_ast_type(&member.ty, ctx.reborrow())?;
+            let ty = self.resolve_ast_type(member.ty, ctx.reborrow())?;
 
             self.layouter
                 .update(&ctx.module.types, &ctx.module.constants)
@@ -5349,10 +5348,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
     fn resolve_ast_type(
         &mut self,
-        ty: &ast::Type<'source>,
+        handle: Handle<ast::Type<'source>>,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
-        let inner = match *ty {
+        let inner = match ctx.types[handle] {
             ast::Type::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
             ast::Type::Vector { size, kind, width } => {
                 crate::TypeInner::Vector { size, kind, width }
@@ -5367,12 +5366,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 width,
             },
             ast::Type::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
-            ast::Type::Pointer { ref base, space } => {
-                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
+            ast::Type::Pointer { base, space } => {
+                let base = self.resolve_ast_type(base, ctx.reborrow())?;
                 crate::TypeInner::Pointer { base, space }
             }
-            ast::Type::Array { ref base, size } => {
-                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
+            ast::Type::Array { base, size } => {
+                let base = self.resolve_ast_type(base, ctx.reborrow())?;
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)
                     .unwrap();
@@ -5400,8 +5399,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 class,
             },
             ast::Type::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
-            ast::Type::BindingArray { ref base, size } => {
-                let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
+            ast::Type::BindingArray { base, size } => {
+                let base = self.resolve_ast_type(base, ctx.reborrow())?;
 
                 crate::TypeInner::BindingArray {
                     base,

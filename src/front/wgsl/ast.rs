@@ -6,6 +6,7 @@ use std::hash::Hash;
 pub struct TranslationUnit<'a> {
     pub decls: Arena<GlobalDecl<'a>>,
     pub global_expressions: Arena<Expression<'a>>,
+    pub types: Arena<Type<'a>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,14 +59,14 @@ pub enum GlobalDeclKind<'a> {
 #[derive(Debug)]
 pub struct FunctionArgument<'a> {
     pub name: Ident<'a>,
-    pub ty: Type<'a>,
+    pub ty: Handle<Type<'a>>,
     pub binding: Option<crate::Binding>,
     pub handle: Handle<Local>,
 }
 
 #[derive(Debug)]
 pub struct FunctionResult<'a> {
-    pub ty: Type<'a>,
+    pub ty: Handle<Type<'a>>,
     pub binding: Option<crate::Binding>,
 }
 
@@ -92,14 +93,14 @@ pub struct GlobalVariable<'a> {
     pub name: Ident<'a>,
     pub space: crate::AddressSpace,
     pub binding: Option<crate::ResourceBinding>,
-    pub ty: Type<'a>,
+    pub ty: Handle<Type<'a>>,
     pub init: Option<Handle<Expression<'a>>>,
 }
 
 #[derive(Debug)]
 pub struct StructMember<'a> {
     pub name: Ident<'a>,
-    pub ty: Type<'a>,
+    pub ty: Handle<Type<'a>>,
     pub binding: Option<crate::Binding>,
     pub align: Option<(u32, Span)>,
     pub size: Option<(u32, Span)>,
@@ -114,13 +115,13 @@ pub struct Struct<'a> {
 #[derive(Debug)]
 pub struct TypeAlias<'a> {
     pub name: Ident<'a>,
-    pub ty: Type<'a>,
+    pub ty: Handle<Type<'a>>,
 }
 
 #[derive(Debug)]
 pub struct Const<'a> {
     pub name: Ident<'a>,
-    pub ty: Option<Type<'a>>,
+    pub ty: Option<Handle<Type<'a>>>,
     pub init: Handle<Expression<'a>>,
 }
 
@@ -151,11 +152,11 @@ pub enum Type<'a> {
         width: crate::Bytes,
     },
     Pointer {
-        base: Box<Type<'a>>,
+        base: Handle<Type<'a>>,
         space: crate::AddressSpace,
     },
     Array {
-        base: Box<Type<'a>>,
+        base: Handle<Type<'a>>,
         size: ArraySize<'a>,
     },
     Image {
@@ -167,7 +168,7 @@ pub enum Type<'a> {
         comparison: bool,
     },
     BindingArray {
-        base: Box<Type<'a>>,
+        base: Handle<Type<'a>>,
         size: ArraySize<'a>,
     },
     User(Ident<'a>),
@@ -186,7 +187,7 @@ pub struct Statement<'a> {
 
 #[derive(Debug)]
 pub enum StatementKind<'a> {
-    LocalDecl(Box<LocalDecl<'a>>),
+    LocalDecl(LocalDecl<'a>),
     Block(Block<'a>),
     If {
         condition: Handle<Expression<'a>>,
@@ -262,7 +263,7 @@ pub enum ConstructorType<'a> {
     },
     PartialArray,
     Array {
-        base: Type<'a>,
+        base: Handle<Type<'a>>,
         size: ArraySize<'a>,
     },
     Type(Handle<crate::Type>),
@@ -308,7 +309,7 @@ pub enum Expression<'a> {
     },
     Bitcast {
         expr: Handle<Expression<'a>>,
-        to: Type<'a>,
+        to: Handle<Type<'a>>,
         ty_span: Span,
     },
 }
@@ -316,7 +317,7 @@ pub enum Expression<'a> {
 #[derive(Debug)]
 pub struct LocalVariable<'a> {
     pub name: Ident<'a>,
-    pub ty: Option<Type<'a>>,
+    pub ty: Option<Handle<Type<'a>>>,
     pub init: Option<Handle<Expression<'a>>>,
     pub handle: Handle<Local>,
 }
@@ -324,7 +325,7 @@ pub struct LocalVariable<'a> {
 #[derive(Debug)]
 pub struct Let<'a> {
     pub name: Ident<'a>,
-    pub ty: Option<Type<'a>>,
+    pub ty: Option<Handle<Type<'a>>>,
     pub init: Handle<Expression<'a>>,
     pub handle: Handle<Local>,
 }
