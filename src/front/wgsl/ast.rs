@@ -124,12 +124,6 @@ pub struct Const<'a> {
     pub init: Handle<Expression<'a>>,
 }
 
-#[derive(Debug)]
-pub struct Type<'a> {
-    pub kind: TypeKind<'a>,
-    pub span: Span,
-}
-
 #[derive(Debug, Copy, Clone)]
 pub enum ArraySize<'a> {
     Constant(Handle<Expression<'a>>),
@@ -137,7 +131,7 @@ pub enum ArraySize<'a> {
 }
 
 #[derive(Debug)]
-pub enum TypeKind<'a> {
+pub enum Type<'a> {
     Scalar {
         kind: crate::ScalarKind,
         width: crate::Bytes,
@@ -192,7 +186,7 @@ pub struct Statement<'a> {
 
 #[derive(Debug)]
 pub enum StatementKind<'a> {
-    VarDecl(Box<VarDecl<'a>>),
+    LocalDecl(Box<LocalDecl<'a>>),
     Block(Block<'a>),
     If {
         condition: Handle<Expression<'a>>,
@@ -315,6 +309,7 @@ pub enum Expression<'a> {
     Bitcast {
         expr: Handle<Expression<'a>>,
         to: Type<'a>,
+        ty_span: Span,
     },
 }
 
@@ -335,7 +330,7 @@ pub struct Let<'a> {
 }
 
 #[derive(Debug)]
-pub enum VarDecl<'a> {
+pub enum LocalDecl<'a> {
     Var(LocalVariable<'a>),
     Let(Let<'a>),
 }

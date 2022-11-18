@@ -74,8 +74,6 @@ pub enum ExpectedToken<'a> {
     Assignment,
     /// Expected: '}', identifier
     FieldName,
-    /// Expected: attribute for a type
-    TypeAttribute,
     /// Expected: 'case', 'default', '}'
     SwitchItem,
     /// Expected: ',', ')'
@@ -231,7 +229,6 @@ impl<'a> Error<'a> {
                         ExpectedToken::PrimaryExpression => "expression".to_string(),
                         ExpectedToken::Assignment => "assignment or increment/decrement".to_string(),
                         ExpectedToken::FieldName => "field name or a closing curly bracket to signify the end of the struct".to_string(),
-                        ExpectedToken::TypeAttribute => "type attribute".to_string(),
                         ExpectedToken::SwitchItem => "switch item ('case' or 'default') or a closing curly bracket to signify the end of the switch statement ('}')".to_string(),
                         ExpectedToken::WorkgroupSizeSeparator => "workgroup size separator (',') or a closing parenthesis".to_string(),
                         ExpectedToken::GlobalItem => "global item ('struct', 'const', 'var', 'type', ';', 'fn') or the end of the file".to_string(),
@@ -1427,13 +1424,6 @@ impl Composition {
     }
 }
 
-#[derive(Default)]
-struct TypeAttributes {
-    // Although WGSL nas no type attributes at the moment, it had them in the past
-    // (`[[stride]]`) and may as well acquire some again in the future.
-    // Therefore, we are leaving the plumbing in for now.
-}
-
 /// Which grammar rule we are in the midst of parsing.
 ///
 /// This is used for error checking. `Parser` maintains a stack of
@@ -1528,14 +1518,6 @@ impl BindingParser {
             (_, _, _, _, _) => Err(Error::InconsistentBinding(span)),
         }
     }
-}
-
-struct ParsedVariable<'a> {
-    name: &'a str,
-    name_span: Span,
-    space: Option<crate::AddressSpace>,
-    ty: ast::Type<'a>,
-    init: Option<Handle<ast::Expression<'a>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1850,14 +1832,20 @@ impl Parser {
             // bitcast looks like a function call, but it's an operator and must be handled differently.
             "bitcast" => {
                 lexer.expect_generic_paren('<')?;
+                let start = lexer.start_byte_offset();
                 let to = self.parse_type_decl(lexer, ctx.reborrow())?;
+                let span = lexer.span_from(start);
                 lexer.expect_generic_paren('>')?;
 
                 lexer.open_arguments()?;
                 let expr = self.parse_general_expression(lexer, ctx.reborrow())?;
                 lexer.close_arguments()?;
 
-                ast::Expression::Bitcast { expr, to }
+                ast::Expression::Bitcast {
+                    expr,
+                    to,
+                    ty_span: span,
+                }
             }
             // everything else must be handled later, since they can be hidden by user-defined functions.
             _ => {
@@ -1967,15 +1955,9 @@ impl Parser {
             let expression = match lexer.peek().0 {
                 Token::Separator('.') => {
                     let _ = lexer.next();
-                    let (name, name_span) = lexer.next_ident_with_span()?;
+                    let field = lexer.next_ident()?;
 
-                    ast::Expression::Member {
-                        base: expr,
-                        field: ast::Ident {
-                            name,
-                            span: name_span,
-                        },
-                    }
+                    ast::Expression::Member { base: expr, field }
                 }
                 Token::Paren('[') => {
                     let _ = lexer.next();
@@ -2210,28 +2192,17 @@ impl Parser {
         Ok((handle, self.pop_rule_span(lexer)))
     }
 
-    fn parse_variable_ident_decl<'a>(
-        &mut self,
-        lexer: &mut Lexer<'a>,
-        ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<(ast::Ident<'a>, ast::Type<'a>), Error<'a>> {
-        let (name, span) = lexer.next_ident_with_span()?;
-        lexer.expect(Token::Separator(':'))?;
-        let ty = self.parse_type_decl(lexer, ctx)?;
-        Ok((ast::Ident { name, span }, ty))
-    }
-
     fn parse_variable_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
         mut ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<ParsedVariable<'a>, Error<'a>> {
+    ) -> Result<ast::GlobalVariable<'a>, Error<'a>> {
         self.push_rule_span(Rule::VariableDecl, lexer);
-        let mut space = None;
+        let mut space = crate::AddressSpace::Handle;
 
         if lexer.skip(Token::Paren('<')) {
             let (class_str, span) = lexer.next_ident_with_span()?;
-            space = Some(match class_str {
+            space = match class_str {
                 "storage" => {
                     let access = if lexer.skip(Token::Separator(',')) {
                         lexer.next_storage_access()?
@@ -2242,7 +2213,7 @@ impl Parser {
                     crate::AddressSpace::Storage { access }
                 }
                 _ => conv::map_address_space(class_str, span)?,
-            });
+            };
             lexer.expect(Token::Paren('>'))?;
         }
         let name = lexer.next_ident()?;
@@ -2256,11 +2227,12 @@ impl Parser {
             None
         };
         lexer.expect(Token::Separator(';'))?;
-        let name_span = self.pop_rule_span(lexer);
-        Ok(ParsedVariable {
+        self.pop_rule_span(lexer);
+
+        Ok(ast::GlobalVariable {
             name,
-            name_span,
             space,
+            binding: None,
             ty,
             init,
         })
@@ -2308,19 +2280,13 @@ impl Parser {
             let bind_span = self.pop_rule_span(lexer);
             let binding = bind_parser.finish(bind_span)?;
 
-            let (name, span) = match lexer.next() {
-                (Token::Word(word), span) => (word, span),
-                other => return Err(Error::Unexpected(other.1, ExpectedToken::FieldName)),
-            };
-            if crate::keywords::wgsl::RESERVED.contains(&name) {
-                return Err(Error::ReservedKeyword(span));
-            }
+            let name = lexer.next_ident()?;
             lexer.expect(Token::Separator(':'))?;
             let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
             ready = lexer.skip(Token::Separator(','));
 
             members.push(ast::StructMember {
-                name: ast::Ident { name, span },
+                name,
                 ty,
                 binding,
                 size,
@@ -2336,10 +2302,10 @@ impl Parser {
         lexer: &mut Lexer<'a>,
         columns: crate::VectorSize,
         rows: crate::VectorSize,
-    ) -> Result<ast::TypeKind<'a>, Error<'a>> {
+    ) -> Result<ast::Type<'a>, Error<'a>> {
         let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
         match kind {
-            crate::ScalarKind::Float => Ok(ast::TypeKind::Matrix {
+            crate::ScalarKind::Float => Ok(ast::Type::Matrix {
                 columns,
                 rows,
                 width,
@@ -2351,18 +2317,17 @@ impl Parser {
     fn parse_type_decl_impl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
-        _attribute: TypeAttributes,
         word: &'a str,
         mut ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<Option<ast::TypeKind<'a>>, Error<'a>> {
+    ) -> Result<Option<ast::Type<'a>>, Error<'a>> {
         if let Some((kind, width)) = conv::get_scalar_type(word) {
-            return Ok(Some(ast::TypeKind::Scalar { kind, width }));
+            return Ok(Some(ast::Type::Scalar { kind, width }));
         }
 
         Ok(Some(match word {
             "vec2" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                ast::TypeKind::Vector {
+                ast::Type::Vector {
                     size: crate::VectorSize::Bi,
                     kind,
                     width,
@@ -2370,7 +2335,7 @@ impl Parser {
             }
             "vec3" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                ast::TypeKind::Vector {
+                ast::Type::Vector {
                     size: crate::VectorSize::Tri,
                     kind,
                     width,
@@ -2378,7 +2343,7 @@ impl Parser {
             }
             "vec4" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                ast::TypeKind::Vector {
+                ast::Type::Vector {
                     size: crate::VectorSize::Quad,
                     kind,
                     width,
@@ -2425,7 +2390,7 @@ impl Parser {
             )?,
             "atomic" => {
                 let (kind, width) = lexer.next_scalar_generic()?;
-                ast::TypeKind::Atomic { kind, width }
+                ast::Type::Atomic { kind, width }
             }
             "ptr" => {
                 lexer.expect_generic_paren('<')?;
@@ -2441,7 +2406,7 @@ impl Parser {
                     };
                 }
                 lexer.expect_generic_paren('>')?;
-                ast::TypeKind::Pointer {
+                ast::Type::Pointer {
                     base: Box::new(base),
                     space,
                 }
@@ -2457,7 +2422,7 @@ impl Parser {
                 };
                 lexer.expect_generic_paren('>')?;
 
-                ast::TypeKind::Array {
+                ast::Type::Array {
                     base: Box::new(base),
                     size,
                 }
@@ -2473,17 +2438,17 @@ impl Parser {
                 };
                 lexer.expect_generic_paren('>')?;
 
-                ast::TypeKind::BindingArray {
+                ast::Type::BindingArray {
                     base: Box::new(base),
                     size,
                 }
             }
-            "sampler" => ast::TypeKind::Sampler { comparison: false },
-            "sampler_comparison" => ast::TypeKind::Sampler { comparison: true },
+            "sampler" => ast::Type::Sampler { comparison: false },
+            "sampler_comparison" => ast::Type::Sampler { comparison: true },
             "texture_1d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2492,7 +2457,7 @@ impl Parser {
             "texture_1d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2501,7 +2466,7 @@ impl Parser {
             "texture_2d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2510,7 +2475,7 @@ impl Parser {
             "texture_2d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2519,7 +2484,7 @@ impl Parser {
             "texture_3d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D3,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2528,7 +2493,7 @@ impl Parser {
             "texture_cube" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::Cube,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2537,7 +2502,7 @@ impl Parser {
             "texture_cube_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::Cube,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: false },
@@ -2546,7 +2511,7 @@ impl Parser {
             "texture_multisampled_2d" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Sampled { kind, multi: true },
@@ -2555,40 +2520,40 @@ impl Parser {
             "texture_multisampled_2d_array" => {
                 let (kind, width, span) = lexer.next_scalar_generic_with_span()?;
                 Self::check_texture_sample_type(kind, width, span)?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Sampled { kind, multi: true },
                 }
             }
-            "texture_depth_2d" => ast::TypeKind::Image {
+            "texture_depth_2d" => ast::Type::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_2d_array" => ast::TypeKind::Image {
+            "texture_depth_2d_array" => ast::Type::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: true,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_cube" => ast::TypeKind::Image {
+            "texture_depth_cube" => ast::Type::Image {
                 dim: crate::ImageDimension::Cube,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_cube_array" => ast::TypeKind::Image {
+            "texture_depth_cube_array" => ast::Type::Image {
                 dim: crate::ImageDimension::Cube,
                 arrayed: true,
                 class: crate::ImageClass::Depth { multi: false },
             },
-            "texture_depth_multisampled_2d" => ast::TypeKind::Image {
+            "texture_depth_multisampled_2d" => ast::Type::Image {
                 dim: crate::ImageDimension::D2,
                 arrayed: false,
                 class: crate::ImageClass::Depth { multi: true },
             },
             "texture_storage_1d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -2596,7 +2561,7 @@ impl Parser {
             }
             "texture_storage_1d_array" => {
                 let (format, access) = lexer.next_format_generic()?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D1,
                     arrayed: true,
                     class: crate::ImageClass::Storage { format, access },
@@ -2604,7 +2569,7 @@ impl Parser {
             }
             "texture_storage_2d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -2612,7 +2577,7 @@ impl Parser {
             }
             "texture_storage_2d_array" => {
                 let (format, access) = lexer.next_format_generic()?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D2,
                     arrayed: true,
                     class: crate::ImageClass::Storage { format, access },
@@ -2620,7 +2585,7 @@ impl Parser {
             }
             "texture_storage_3d" => {
                 let (format, access) = lexer.next_format_generic()?;
-                ast::TypeKind::Image {
+                ast::Type::Image {
                     dim: crate::ImageDimension::D3,
                     arrayed: false,
                     class: crate::ImageClass::Storage { format, access },
@@ -2643,41 +2608,21 @@ impl Parser {
         }
     }
 
-    /// Parse type declaration of a given name and attribute.
-    fn parse_type_decl_name<'a>(
-        &mut self,
-        lexer: &mut Lexer<'a>,
-        name: &'a str,
-        span: Span,
-        attribute: TypeAttributes,
-        ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<ast::Type<'a>, Error<'a>> {
-        Ok(
-            match self.parse_type_decl_impl(lexer, attribute, name, ctx)? {
-                Some(kind) => ast::Type { kind, span },
-                None => ast::Type {
-                    kind: ast::TypeKind::User(ast::Ident { name, span }),
-                    span,
-                },
-            },
-        )
-    }
-
+    /// Parse type declaration of a given name.
     fn parse_type_decl<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,
         ctx: ParseExpressionContext<'a, '_, '_>,
     ) -> Result<ast::Type<'a>, Error<'a>> {
         self.push_rule_span(Rule::TypeDecl, lexer);
-        let attribute = TypeAttributes::default();
-
-        if lexer.skip(Token::Attribute) {
-            let other = lexer.next();
-            return Err(Error::Unexpected(other.1, ExpectedToken::TypeAttribute));
-        }
 
         let (name, span) = lexer.next_ident_with_span()?;
-        let ty = self.parse_type_decl_name(lexer, name, span, attribute, ctx)?;
+
+        let ty = match self.parse_type_decl_impl(lexer, name, ctx)? {
+            Some(ty) => ty,
+            None => ast::Type::User(ast::Ident { name, span }),
+        };
+
         self.pop_rule_span(lexer);
 
         Ok(ty)
@@ -2895,10 +2840,8 @@ impl Parser {
                     }
                     "let" => {
                         let _ = lexer.next();
-                        let (name, name_span) = lexer.next_ident_with_span()?;
-                        if crate::keywords::wgsl::RESERVED.contains(&name) {
-                            return Err(Error::ReservedKeyword(name_span));
-                        }
+                        let name = lexer.next_ident()?;
+
                         let given_ty = if lexer.skip(Token::Separator(':')) {
                             let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
                             Some(ty)
@@ -2909,19 +2852,16 @@ impl Parser {
                         let expr_id = self.parse_general_expression(lexer, ctx.reborrow())?;
                         lexer.expect(Token::Separator(';'))?;
 
-                        let handle = ctx.locals.append(ast::Local, name_span);
-                        if let Some(old) = ctx.local_table.add(name, handle) {
+                        let handle = ctx.locals.append(ast::Local, name.span);
+                        if let Some(old) = ctx.local_table.add(name.name, handle) {
                             return Err(Error::Redefinition {
                                 previous: ctx.locals.get_span(old),
-                                current: name_span,
+                                current: name.span,
                             });
                         }
 
-                        ast::StatementKind::VarDecl(Box::new(ast::VarDecl::Let(ast::Let {
-                            name: ast::Ident {
-                                name,
-                                span: name_span,
-                            },
+                        ast::StatementKind::LocalDecl(Box::new(ast::LocalDecl::Let(ast::Let {
+                            name,
                             ty: given_ty,
                             init: expr_id,
                             handle,
@@ -2930,10 +2870,7 @@ impl Parser {
                     "var" => {
                         let _ = lexer.next();
 
-                        let (name, name_span) = lexer.next_ident_with_span()?;
-                        if crate::keywords::wgsl::RESERVED.contains(&name) {
-                            return Err(Error::ReservedKeyword(name_span));
-                        }
+                        let name = lexer.next_ident()?;
                         let ty = if lexer.skip(Token::Separator(':')) {
                             let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
                             Some(ty)
@@ -2950,20 +2887,17 @@ impl Parser {
 
                         lexer.expect(Token::Separator(';'))?;
 
-                        let handle = ctx.locals.append(ast::Local, name_span);
-                        if let Some(old) = ctx.local_table.add(name, handle) {
+                        let handle = ctx.locals.append(ast::Local, name.span);
+                        if let Some(old) = ctx.local_table.add(name.name, handle) {
                             return Err(Error::Redefinition {
                                 previous: ctx.locals.get_span(old),
-                                current: name_span,
+                                current: name.span,
                             });
                         }
 
-                        ast::StatementKind::VarDecl(Box::new(ast::VarDecl::Var(
+                        ast::StatementKind::LocalDecl(Box::new(ast::LocalDecl::Var(
                             ast::LocalVariable {
-                                name: ast::Ident {
-                                    name,
-                                    span: name_span,
-                                },
+                                name,
                                 ty,
                                 init,
                                 handle,
@@ -3148,7 +3082,7 @@ impl Parser {
                                 match block.stmts.last().unwrap().kind {
                                     ast::StatementKind::Call { .. }
                                     | ast::StatementKind::Assign { .. }
-                                    | ast::StatementKind::VarDecl(_) => {}
+                                    | ast::StatementKind::LocalDecl(_) => {}
                                     _ => return Err(Error::InvalidForInitializer(span)),
                                 }
                             }
@@ -3368,10 +3302,7 @@ impl Parser {
     ) -> Result<ast::Function<'a>, Error<'a>> {
         self.push_rule_span(Rule::FunctionDecl, lexer);
         // read function name
-        let (fun_name, span) = lexer.next_ident_with_span()?;
-        if crate::keywords::wgsl::RESERVED.contains(&fun_name) {
-            return Err(Error::ReservedKeyword(span));
-        }
+        let fun_name = lexer.next_ident()?;
 
         let mut expressions = Arena::new();
         let mut locals = Arena::new();
@@ -3396,10 +3327,11 @@ impl Parser {
                 ));
             }
             let binding = self.parse_varying_binding(lexer)?;
-            let (param_name, param_type) = self.parse_variable_ident_decl(lexer, ctx.reborrow())?;
-            if crate::keywords::wgsl::RESERVED.contains(&param_name.name) {
-                return Err(Error::ReservedKeyword(param_name.span));
-            }
+
+            let param_name = lexer.next_ident()?;
+
+            lexer.expect(Token::Separator(':'))?;
+            let param_type = self.parse_type_decl(lexer, ctx.reborrow())?;
 
             let handle = ctx.locals.append(ast::Local, param_name.span);
             ctx.local_table.add(param_name.name, handle);
@@ -3425,10 +3357,7 @@ impl Parser {
 
         let fun = ast::Function {
             entry_point: None,
-            name: ast::Ident {
-                name: fun_name,
-                span,
-            },
+            name: fun_name,
             arguments,
             result,
             expressions,
@@ -3535,31 +3464,21 @@ impl Parser {
         let kind = match lexer.next() {
             (Token::Separator(';'), _) => None,
             (Token::Word("struct"), _) => {
-                let (name, span) = lexer.next_ident_with_span()?;
-                if crate::keywords::wgsl::RESERVED.contains(&name) {
-                    return Err(Error::ReservedKeyword(span));
-                }
+                let name = lexer.next_ident()?;
+
                 let members = self.parse_struct_body(lexer, ctx)?;
-                Some(ast::GlobalDeclKind::Struct(ast::Struct {
-                    name: ast::Ident { name, span },
-                    members,
-                }))
+                Some(ast::GlobalDeclKind::Struct(ast::Struct { name, members }))
             }
             (Token::Word("type"), _) => {
-                let (name, span) = lexer.next_ident_with_span()?;
+                let name = lexer.next_ident()?;
+
                 lexer.expect(Token::Operation('='))?;
                 let ty = self.parse_type_decl(lexer, ctx)?;
                 lexer.expect(Token::Separator(';'))?;
-                Some(ast::GlobalDeclKind::Type(ast::TypeAlias {
-                    name: ast::Ident { name, span },
-                    ty,
-                }))
+                Some(ast::GlobalDeclKind::Type(ast::TypeAlias { name, ty }))
             }
             (Token::Word("const"), _) => {
-                let (name, name_span) = lexer.next_ident_with_span()?;
-                if crate::keywords::wgsl::RESERVED.contains(&name) {
-                    return Err(Error::ReservedKeyword(name_span));
-                }
+                let name = lexer.next_ident()?;
 
                 let ty = if lexer.skip(Token::Separator(':')) {
                     let ty = self.parse_type_decl(lexer, ctx.reborrow())?;
@@ -3572,31 +3491,12 @@ impl Parser {
                 let init = self.parse_general_expression(lexer, ctx)?;
                 lexer.expect(Token::Separator(';'))?;
 
-                Some(ast::GlobalDeclKind::Const(ast::Const {
-                    name: ast::Ident {
-                        name,
-                        span: name_span,
-                    },
-                    ty,
-                    init,
-                }))
+                Some(ast::GlobalDeclKind::Const(ast::Const { name, ty, init }))
             }
             (Token::Word("var"), _) => {
-                let pvar = self.parse_variable_decl(lexer, ctx)?;
-                if crate::keywords::wgsl::RESERVED.contains(&pvar.name) {
-                    return Err(Error::ReservedKeyword(pvar.name_span));
-                }
-
-                Some(ast::GlobalDeclKind::Var(ast::GlobalVariable {
-                    name: ast::Ident {
-                        name: pvar.name,
-                        span: pvar.name_span,
-                    },
-                    space: pvar.space.unwrap_or(crate::AddressSpace::Handle),
-                    binding: binding.take(),
-                    ty: pvar.ty,
-                    init: pvar.init,
-                }))
+                let mut var = self.parse_variable_decl(lexer, ctx)?;
+                var.binding = binding.take();
+                Some(ast::GlobalDeclKind::Var(var))
             }
             (Token::Word("fn"), _) => {
                 let function = self.parse_function_decl(lexer, out, &mut dependencies)?;
@@ -3902,8 +3802,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let block = self.lower_block(block, ctx.reborrow())?;
                 crate::Statement::Block(block)
             }
-            ast::StatementKind::VarDecl(ref decl) => match **decl {
-                ast::VarDecl::Let(ref l) => {
+            ast::StatementKind::LocalDecl(ref decl) => match **decl {
+                ast::LocalDecl::Let(ref l) => {
                     let mut emitter = super::Emitter::default();
                     emitter.start(ctx.expressions);
 
@@ -3937,7 +3837,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     return Ok(());
                 }
-                ast::VarDecl::Var(ref v) => {
+                ast::LocalDecl::Var(ref v) => {
                     let mut emitter = super::Emitter::default();
                     emitter.start(ctx.expressions);
 
@@ -4523,7 +4423,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                 access
             }
-            ast::Expression::Bitcast { expr, ref to } => {
+            ast::Expression::Bitcast {
+                expr,
+                ref to,
+                ty_span,
+            } => {
                 let expr = self.lower_expression(expr, ctx.reborrow())?;
                 let to_resolved = self.resolve_ast_type(to, ctx.as_output())?;
 
@@ -4534,7 +4438,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         let ty = ctx.resolve_type(expr)?;
                         return Err(Error::BadTypeCast {
                             from_type: ctx.fmt_ty(ty),
-                            span: to.span,
+                            span: ty_span,
                             to_type: ctx.fmt_ty(to_resolved),
                         });
                     }
@@ -5448,12 +5352,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         ty: &ast::Type<'source>,
         mut ctx: OutputContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
-        let inner = match ty.kind {
-            ast::TypeKind::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
-            ast::TypeKind::Vector { size, kind, width } => {
+        let inner = match *ty {
+            ast::Type::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
+            ast::Type::Vector { size, kind, width } => {
                 crate::TypeInner::Vector { size, kind, width }
             }
-            ast::TypeKind::Matrix {
+            ast::Type::Matrix {
                 rows,
                 columns,
                 width,
@@ -5462,12 +5366,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 rows,
                 width,
             },
-            ast::TypeKind::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
-            ast::TypeKind::Pointer { ref base, space } => {
+            ast::Type::Atomic { kind, width } => crate::TypeInner::Atomic { kind, width },
+            ast::Type::Pointer { ref base, space } => {
                 let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
                 crate::TypeInner::Pointer { base, space }
             }
-            ast::TypeKind::Array { ref base, size } => {
+            ast::Type::Array { ref base, size } => {
                 let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
                 self.layouter
                     .update(&ctx.module.types, &ctx.module.constants)
@@ -5486,7 +5390,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     stride: self.layouter[base].to_stride(),
                 }
             }
-            ast::TypeKind::Image {
+            ast::Type::Image {
                 dim,
                 arrayed,
                 class,
@@ -5495,8 +5399,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 arrayed,
                 class,
             },
-            ast::TypeKind::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
-            ast::TypeKind::BindingArray { ref base, size } => {
+            ast::Type::Sampler { comparison } => crate::TypeInner::Sampler { comparison },
+            ast::Type::BindingArray { ref base, size } => {
                 let base = self.resolve_ast_type(base.as_ref(), ctx.reborrow())?;
 
                 crate::TypeInner::BindingArray {
@@ -5511,7 +5415,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     },
                 }
             }
-            ast::TypeKind::User(ref ident) => {
+            ast::Type::User(ref ident) => {
                 return match ctx.globals.get(ident.name) {
                     Some(&GlobalDecl::Type(handle)) => Ok(handle),
                     Some(_) => Err(Error::Unexpected(ident.span, ExpectedToken::Type)),

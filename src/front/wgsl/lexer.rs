@@ -304,8 +304,16 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub(super) fn next_ident(&mut self) -> Result<&'a str, Error<'a>> {
-        self.next_ident_with_span().map(|(word, _)| word)
+    pub(super) fn next_ident(&mut self) -> Result<super::ast::Ident<'a>, Error<'a>> {
+        let ident = self
+            .next_ident_with_span()
+            .map(|(name, span)| super::ast::Ident { name, span })?;
+
+        if crate::keywords::wgsl::RESERVED.contains(&ident.name) {
+            return Err(Error::ReservedKeyword(ident.span));
+        }
+
+        Ok(ident)
     }
 
     /// Parses a generic scalar type, for example `<f32>`.
