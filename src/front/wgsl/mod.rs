@@ -1068,11 +1068,6 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
     }
 }
 
-struct SamplingContext {
-    image: Handle<crate::Expression>,
-    arrayed: bool,
-}
-
 struct ExpressionContext<'source, 'temp, 'out> {
     local_table: &'temp mut FastHashMap<Handle<ast::Local>, TypedExpression>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
@@ -1134,21 +1129,16 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         }
     }
 
-    fn prepare_sampling(
+    fn image_data(
         &mut self,
         image: Handle<crate::Expression>,
         span: Span,
-    ) -> Result<SamplingContext, Error<'a>> {
-        Ok(SamplingContext {
-            image,
-            arrayed: {
-                let ty = self.resolve_type(image)?;
-                match self.module.types[ty].inner {
-                    crate::TypeInner::Image { arrayed, .. } => arrayed,
-                    _ => return Err(Error::BadTexture(span)),
-                }
-            },
-        })
+    ) -> Result<(crate::ImageClass, bool), Error<'a>> {
+        let ty = self.resolve_type(image)?;
+        match self.module.types[ty].inner {
+            crate::TypeInner::Image { class, arrayed, .. } => Ok((class, arrayed)),
+            _ => Err(Error::BadTexture(span)),
+        }
     }
 
     fn prepare_args<'b>(
@@ -3573,6 +3563,52 @@ enum ConstantOrInner {
     Inner(crate::ConstantInner),
 }
 
+enum Texture {
+    Gather,
+    GatherCompare,
+
+    Sample,
+    SampleBias,
+    SampleCompare,
+    SampleCompareLevel,
+    SampleGrad,
+    SampleLevel,
+    // SampleBaseClampToEdge,
+}
+
+impl Texture {
+    pub fn map(word: &str) -> Option<Self> {
+        Some(match word {
+            "textureGather" => Self::Gather,
+            "textureGatherCompare" => Self::GatherCompare,
+
+            "textureSample" => Self::Sample,
+            "textureSampleBias" => Self::SampleBias,
+            "textureSampleCompare" => Self::SampleCompare,
+            "textureSampleCompareLevel" => Self::SampleCompareLevel,
+            "textureSampleGrad" => Self::SampleGrad,
+            "textureSampleLevel" => Self::SampleLevel,
+            // "textureSampleBaseClampToEdge" => Some(Self::SampleBaseClampToEdge),
+            _ => return None,
+        })
+    }
+
+    pub const fn min_argument_count(&self) -> u32 {
+        match *self {
+            Self::Gather => 3,
+            Self::GatherCompare => 4,
+
+            Self::Sample => 3,
+            Self::SampleBias => 5,
+            Self::SampleCompare => 5,
+            Self::SampleCompareLevel => 5,
+            Self::SampleGrad => 6,
+            Self::SampleLevel => 5,
+            // Self::SampleBaseClampToEdge => 3,
+        }
+    }
+}
+
 struct Lowerer<'source, 'temp> {
     index: &'temp index::Index<'source>,
     layouter: Layouter,
@@ -4550,6 +4586,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         arg2,
                         arg3,
                     }
+                } else if let Some(fun) = Texture::map(function.name) {
+                    self.texture_sample_helper(fun, arguments, span, ctx.reborrow())?
                 } else {
                     match function.name {
                         "select" => {
@@ -4719,12 +4757,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
+                            let (_, arrayed) = ctx.image_data(image, image_span)?;
+                            let array_index = arrayed
+                                .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
+                                .transpose()?;
 
                             let value = self.lower_expression(args.next()?, ctx.reborrow())?;
 
@@ -4741,341 +4777,6 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             ctx.block.push(stmt, span);
                             return Ok(None);
                         }
-                        "textureSample" => {
-                            let mut args = ctx.prepare_args(arguments, 3, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Auto,
-                                depth_ref: None,
-                            }
-                        }
-                        "textureSampleLevel" => {
-                            let mut args = ctx.prepare_args(arguments, 5, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let level = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Exact(level),
-                                depth_ref: None,
-                            }
-                        }
-                        "textureSampleBias" => {
-                            let mut args = ctx.prepare_args(arguments, 5, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let bias = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Bias(bias),
-                                depth_ref: None,
-                            }
-                        }
-                        "textureSampleGrad" => {
-                            let mut args = ctx.prepare_args(arguments, 6, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let x = self.lower_expression(args.next()?, ctx.reborrow())?;
-                            let y = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Gradient { x, y },
-                                depth_ref: None,
-                            }
-                        }
-                        "textureSampleCompare" => {
-                            let mut args = ctx.prepare_args(arguments, 5, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Auto,
-                                depth_ref: Some(reference),
-                            }
-                        }
-                        "textureSampleCompareLevel" => {
-                            let mut args = ctx.prepare_args(arguments, 5, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: None,
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Zero,
-                                depth_ref: Some(reference),
-                            }
-                        }
-                        "textureGather" => {
-                            let mut args = ctx.prepare_args(arguments, 3, span);
-
-                            let mut image_or_component = args.next()?;
-                            let component =
-                                match self.gather_component(image_or_component, ctx.reborrow())? {
-                                    Some(x) => {
-                                        image_or_component = args.next()?;
-                                        x
-                                    }
-                                    None => crate::SwizzleComponent::X,
-                                };
-
-                            let image = image_or_component;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: Some(component),
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Zero,
-                                depth_ref: None,
-                            }
-                        }
-                        "textureGatherCompare" => {
-                            let mut args = ctx.prepare_args(arguments, 4, span);
-
-                            let image = args.next()?;
-                            let image_span = ctx.read_expressions.get_span(image);
-                            let image = self.lower_expression(image, ctx.reborrow())?;
-
-                            let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let sc = ctx.prepare_sampling(image, image_span)?;
-                            let array_index = if sc.arrayed {
-                                Some(self.lower_expression(args.next()?, ctx.reborrow())?)
-                            } else {
-                                None
-                            };
-
-                            let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
-
-                            let offset = args
-                                .next()
-                                .map(|arg| {
-                                    self.constant(arg, ctx.read_expressions, ctx.as_output())
-                                })
-                                .ok()
-                                .transpose()?;
-
-                            args.finish()?;
-
-                            crate::Expression::ImageSample {
-                                image: sc.image,
-                                sampler,
-                                gather: Some(crate::SwizzleComponent::X),
-                                coordinate,
-                                array_index,
-                                offset,
-                                level: crate::SampleLevel::Zero,
-                                depth_ref: Some(reference),
-                            }
-                        }
                         "textureLoad" => {
                             let mut args = ctx.prepare_args(arguments, 3, span);
 
@@ -5085,11 +4786,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                             let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
 
-                            let ty = ctx.resolve_type(image)?;
-                            let (class, arrayed) = match ctx.module.types[ty].inner {
-                                crate::TypeInner::Image { class, arrayed, .. } => (class, arrayed),
-                                _ => return Err(Error::BadTexture(image_span)),
-                            };
+                            let (class, arrayed) = ctx.image_data(image, image_span)?;
                             let array_index = arrayed
                                 .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
                                 .transpose()?;
@@ -5232,6 +4929,100 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             span,
         );
         Ok(result)
+    }
+
+    fn texture_sample_helper(
+        &mut self,
+        fun: Texture,
+        args: &[Handle<ast::Expression<'source>>],
+        span: Span,
+        mut ctx: ExpressionContext<'source, '_, '_>,
+    ) -> Result<crate::Expression, Error<'source>> {
+        let mut args = ctx.prepare_args(args, fun.min_argument_count(), span);
+
+        let (image, gather) = match fun {
+            Texture::Gather => {
+                let image_or_component = args.next()?;
+                match self.gather_component(image_or_component, ctx.reborrow())? {
+                    Some(component) => {
+                        let image = args.next()?;
+                        (image, Some(component))
+                    }
+                    None => (image_or_component, Some(crate::SwizzleComponent::X)),
+                }
+            }
+            Texture::GatherCompare => {
+                let image = args.next()?;
+                (image, Some(crate::SwizzleComponent::X))
+            }
+
+            _ => {
+                let image = args.next()?;
+                (image, None)
+            }
+        };
+
+        let image_span = ctx.read_expressions.get_span(image);
+        let image = self.lower_expression(image, ctx.reborrow())?;
+
+        let sampler = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+        let coordinate = self.lower_expression(args.next()?, ctx.reborrow())?;
+
+        let (_, arrayed) = ctx.image_data(image, image_span)?;
+        let array_index = arrayed
+            .then(|| self.lower_expression(args.next()?, ctx.reborrow()))
+            .transpose()?;
+
+        let (level, depth_ref) = match fun {
+            Texture::Gather => (crate::SampleLevel::Zero, None),
+            Texture::GatherCompare => {
+                let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Zero, Some(reference))
+            }
+
+            Texture::Sample => (crate::SampleLevel::Auto, None),
+            Texture::SampleBias => {
+                let bias = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Bias(bias), None)
+            }
+            Texture::SampleCompare => {
+                let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Auto, Some(reference))
+            }
+            Texture::SampleCompareLevel => {
+                let reference = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Zero, Some(reference))
+            }
+            Texture::SampleGrad => {
+                let x = self.lower_expression(args.next()?, ctx.reborrow())?;
+                let y = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Gradient { x, y }, None)
+            }
+            Texture::SampleLevel => {
+                let level = self.lower_expression(args.next()?, ctx.reborrow())?;
+                (crate::SampleLevel::Exact(level), None)
+            }
+        };
+
+        let offset = args
+            .next()
+            .map(|arg| self.constant(arg, ctx.read_expressions, ctx.as_output()))
+            .ok()
+            .transpose()?;
+
+        args.finish()?;
+
+        Ok(crate::Expression::ImageSample {
+            image,
+            sampler,
+            gather,
+            coordinate,
+            array_index,
+            offset,
+            level,
+            depth_ref,
+        })
     }
 
     fn gather_component(
