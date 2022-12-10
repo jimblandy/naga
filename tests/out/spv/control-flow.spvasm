@@ -45,10 +45,10 @@ OpFunctionEnd
 OpBranch %22
 %22 = OpLabel
 OpSelectionMerge %23 None
-OpSwitch %5 %24 0 %25
-%25 = OpLabel
-OpBranch %23
+OpSwitch %5 %25 0 %24
 %24 = OpLabel
+OpBranch %23
+%25 = OpLabel
 OpBranch %23
 %23 = OpLabel
 OpReturn
@@ -64,10 +64,10 @@ OpLoopMerge %31 %33 None
 OpBranch %32
 %32 = OpLabel
 OpSelectionMerge %34 None
-OpSwitch %27 %35 1 %36
-%36 = OpLabel
-OpBranch %33
+OpSwitch %27 %36 1 %35
 %35 = OpLabel
+OpBranch %33
+%36 = OpLabel
 OpBranch %34
 %34 = OpLabel
 OpBranch %33
@@ -92,45 +92,45 @@ OpBranch %50
 %50 = OpLabel
 %52 = OpLoad  %4  %37
 OpSelectionMerge %53 None
-OpSwitch %52 %54 1 %55 2 %56 3 %57 4 %58
-%55 = OpLabel
+OpSwitch %52 %58 1 %54 2 %55 3 %56 4 %56 5 %57 6 %58
+%54 = OpLabel
 OpStore %37 %5
 OpBranch %53
-%56 = OpLabel
+%55 = OpLabel
 OpStore %37 %3
 OpBranch %53
-%57 = OpLabel
+%56 = OpLabel
 OpStore %37 %6
-OpBranch %58
-%58 = OpLabel
+OpBranch %53
+%57 = OpLabel
 OpStore %37 %7
-OpBranch %54
-%54 = OpLabel
+OpBranch %53
+%58 = OpLabel
 OpStore %37 %8
 OpBranch %53
 %53 = OpLabel
 OpSelectionMerge %59 None
-OpSwitch %9 %60 0 %61
-%61 = OpLabel
-OpBranch %59
+OpSwitch %9 %61 0 %60
 %60 = OpLabel
+OpBranch %59
+%61 = OpLabel
 OpBranch %59
 %59 = OpLabel
 %62 = OpLoad  %4  %37
 OpSelectionMerge %63 None
-OpSwitch %62 %64 1 %65 2 %66 3 %67 4 %68
-%65 = OpLabel
+OpSwitch %62 %68 1 %64 2 %65 3 %66 4 %67
+%64 = OpLabel
 OpStore %37 %5
 OpBranch %63
-%66 = OpLabel
+%65 = OpLabel
 OpStore %37 %3
 OpReturn
-%67 = OpLabel
+%66 = OpLabel
 OpStore %37 %6
-OpBranch %68
-%68 = OpLabel
 OpReturn
-%64 = OpLabel
+%67 = OpLabel
+OpReturn
+%68 = OpLabel
 OpStore %37 %7
 OpReturn
 %63 = OpLabel

@@ -246,6 +246,7 @@ pub(crate) type NamedExpressions = FastHashMap<Handle<Expression>, String>;
 ///   - GLSL: `layout(early_fragment_tests) in;`
 ///   - HLSL: `Attribute earlydepthstencil`
 ///   - SPIR-V: `ExecutionMode EarlyFragmentTests`
+///   - WGSL: `@early_depth_test`
 ///
 /// For more, see:
 ///   - <https://www.khronos.org/opengl/wiki/Early_Fragment_Test#Explicit_specification>
@@ -265,6 +266,7 @@ pub struct EarlyDepthTest {
 ///     - `depth_any` option behaves as if the layout qualifier was not present.
 ///   - HLSL: `SV_DepthGreaterEqual`/`SV_DepthLessEqual`/`SV_Depth`
 ///   - SPIR-V: `ExecutionMode Depth<Greater/Less/Unchanged>`
+///   - WGSL: `@early_depth_test(greater_equal/less_equal/unchanged)`
 ///
 /// For more, see:
 ///   - <https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_conservative_depth.txt>
@@ -1464,6 +1466,22 @@ pub enum Statement {
         reject: Block,
     },
     /// Conditionally executes one of multiple blocks, based on the value of the selector.
+    ///
+    /// Each case must have a distinct [`value`], exactly one of which must be
+    /// [`Default`]. The `Default` may appear at any position, and covers all
+    /// values not explicitly appearing in other cases. A `Default` appearing in
+    /// the midst of the list of cases does not shadow the cases that follow.
+    ///
+    /// Some backend languages don't support fallthrough (HLSL due to FXC,
+    /// WGSL), and may translate fallthrough cases in the IR by duplicating
+    /// code. However, all backend languages do support cases selected by
+    /// multiple values, like `case 1: case 2: case 3: { ... }`. This is
+    /// represented in the IR as a series of fallthrough cases with empty
+    /// bodies, except for the last.
+    ///
+    /// [`value`]: SwitchCase::value
+    /// [`body`]: SwitchCase::body
+    /// [`Default`]: SwitchValue::Default
     Switch {
         selector: Handle<Expression>, //int
         cases: Vec<SwitchCase>,

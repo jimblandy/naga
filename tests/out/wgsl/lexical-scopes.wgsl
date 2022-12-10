@@ -29,6 +29,8 @@ fn forLexicalScope(a_3: f32) {
         } else {
             break;
         }
+        {
+        }
         continuing {
             let _e8 = a_4;
             a_4 = (_e8 + 1);
@@ -42,6 +44,8 @@ fn whileLexicalScope(a_5: i32) {
         if (a_5 > 2) {
         } else {
             break;
+        }
+        {
         }
     }
     let test_5 = (a_5 == 1);

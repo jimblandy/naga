@@ -1639,6 +1639,7 @@ impl Parser {
     ) -> Result<(ast::SwitchValue, Span), Error<'a>> {
         let token_span = lexer.next();
         match token_span.0 {
+            Token::Word("default") => Ok((ast::SwitchValue::Default, token_span.1)),
             Token::Number(Ok(Number::U32(num))) => Ok((ast::SwitchValue::U32(num), token_span.1)),
             Token::Number(Ok(Number::I32(num))) => Ok((ast::SwitchValue::I32(num), token_span.1)),
             Token::Number(Err(e)) => Err(Error::BadNumber(token_span.1, e)),
@@ -2771,35 +2772,6 @@ impl Parser {
         }
     }
 
-    fn parse_switch_case_body<'a>(
-        &mut self,
-        lexer: &mut Lexer<'a>,
-        mut ctx: ParseExpressionContext<'a, '_, '_>,
-    ) -> Result<(bool, ast::Block<'a>), Error<'a>> {
-        let mut body = ast::Block::default();
-
-        lexer.expect(Token::Paren('{'))?;
-
-        ctx.local_table.push_scope();
-
-        let fall_through = loop {
-            // default statements
-            if lexer.skip(Token::Word("fallthrough")) {
-                lexer.expect(Token::Separator(';'))?;
-                lexer.expect(Token::Paren('}'))?;
-                break true;
-            }
-            if lexer.skip(Token::Paren('}')) {
-                break false;
-            }
-            self.parse_statement(lexer, ctx.reborrow(), &mut body)?;
-        };
-
-        ctx.local_table.pop_scope();
-
-        Ok((fall_through, body))
-    }
-
     fn parse_statement<'a, 'out>(
         &mut self,
         lexer: &mut Lexer<'a>,
@@ -2986,33 +2958,28 @@ impl Parser {
                                         });
                                     };
 
-                                    let (fall_through, body) =
-                                        self.parse_switch_case_body(lexer, ctx.reborrow())?;
+                                    let body = self.parse_block(lexer, ctx.reborrow())?.0;
 
                                     cases.push(ast::SwitchCase {
                                         value,
                                         value_span,
                                         body,
-                                        fall_through,
+                                        fall_through: false,
                                     });
                                 }
                                 (Token::Word("default"), value_span) => {
                                     lexer.skip(Token::Separator(':'));
-                                    let (fall_through, body) =
-                                        self.parse_switch_case_body(lexer, ctx.reborrow())?;
+                                    let body = self.parse_block(lexer, ctx.reborrow())?.0;
                                     cases.push(ast::SwitchCase {
                                         value: ast::SwitchValue::Default,
                                         value_span,
                                         body,
-                                        fall_through,
+                                        fall_through: false,
                                     });
                                 }
                                 (Token::Paren('}'), _) => break,
-                                other => {
-                                    return Err(Error::Unexpected(
-                                        other.1,
-                                        ExpectedToken::SwitchItem,
-                                    ))
+                                (_, span) => {
+                                    return Err(Error::Unexpected(span, ExpectedToken::SwitchItem))
                                 }
                             }
                         }
@@ -3026,7 +2993,6 @@ impl Parser {
 
                         let (condition, span) = lexer.capture_span(|lexer| {
                             let condition = self.parse_general_expression(lexer, ctx.reborrow())?;
-                            lexer.expect(Token::Paren('{'))?;
                             Ok(condition)
                         })?;
                         let mut reject = ast::Block::default();
@@ -3044,13 +3010,11 @@ impl Parser {
                             span,
                         });
 
-                        ctx.local_table.push_scope();
-
-                        while !lexer.skip(Token::Paren('}')) {
-                            self.parse_statement(lexer, ctx.reborrow(), &mut body)?;
-                        }
-
-                        ctx.local_table.pop_scope();
+                        let (block, span) = self.parse_block(lexer, ctx.reborrow())?;
+                        body.stmts.push(ast::Statement {
+                            kind: ast::StatementKind::Block(block),
+                            span,
+                        });
 
                         ast::StatementKind::Loop {
                             body,
@@ -3113,15 +3077,12 @@ impl Parser {
                             lexer.expect(Token::Paren(')'))?;
                         }
 
-                        ctx.local_table.push_scope();
+                        let (block, span) = self.parse_block(lexer, ctx.reborrow())?;
+                        body.stmts.push(ast::Statement {
+                            kind: ast::StatementKind::Block(block),
+                            span,
+                        });
 
-                        lexer.expect(Token::Paren('{'))?;
-
-                        while !lexer.skip(Token::Paren('}')) {
-                            self.parse_statement(lexer, ctx.reborrow(), &mut body)?;
-                        }
-
-                        ctx.local_table.pop_scope();
                         ctx.local_table.pop_scope();
 
                         ast::StatementKind::Loop {
@@ -3249,6 +3210,7 @@ impl Parser {
         })
     }
 
+    /// compound_statement
     fn parse_block<'a>(
         &mut self,
         lexer: &mut Lexer<'a>,

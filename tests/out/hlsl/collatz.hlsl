@@ -14,16 +14,18 @@ uint collatz_iterations(uint n_base)
         } else {
             break;
         }
-        uint _expr7 = n;
-        if (((_expr7 % 2u) == 0u)) {
-            uint _expr12 = n;
-            n = (_expr12 / 2u);
-        } else {
-            uint _expr16 = n;
-            n = ((3u * _expr16) + 1u);
+        {
+            uint _expr7 = n;
+            if (((_expr7 % 2u) == 0u)) {
+                uint _expr12 = n;
+                n = (_expr12 / 2u);
+            } else {
+                uint _expr16 = n;
+                n = ((3u * _expr16) + 1u);
+            }
+            uint _expr20 = i;
+            i = (_expr20 + 1u);
         }
-        uint _expr20 = i;
-        i = (_expr20 + 1u);
     }
     uint _expr23 = i;
     return _expr23;

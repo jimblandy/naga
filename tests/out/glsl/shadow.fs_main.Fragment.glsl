@@ -64,14 +64,16 @@ void main() {
         } else {
             break;
         }
-        uint _e16 = i;
-        Light light = _group_0_binding_1_fs[_e16];
-        uint _e19 = i;
-        float _e23 = fetch_shadow(_e19, (light.proj * in_.world_position));
-        vec3 light_dir = normalize((light.pos.xyz - in_.world_position.xyz));
-        float diffuse = max(0.0, dot(normal_1, light_dir));
-        vec3 _e37 = color;
-        color = (_e37 + ((_e23 * diffuse) * light.color.xyz));
+        {
+            uint _e16 = i;
+            Light light = _group_0_binding_1_fs[_e16];
+            uint _e19 = i;
+            float _e23 = fetch_shadow(_e19, (light.proj * in_.world_position));
+            vec3 light_dir = normalize((light.pos.xyz - in_.world_position.xyz));
+            float diffuse = max(0.0, dot(normal_1, light_dir));
+            vec3 _e37 = color;
+            color = (_e37 + ((_e23 * diffuse) * light.color.xyz));
+        }
     }
     vec3 _e42 = color;
     vec4 _e47 = _group_1_binding_0_fs.color;
