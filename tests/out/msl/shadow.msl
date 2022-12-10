@@ -115,14 +115,16 @@ fragment fs_mainOutput fs_main(
         } else {
             break;
         }
-        uint _e16 = i;
-        Light light = s_lights[_e16];
-        uint _e19 = i;
-        float _e23 = fetch_shadow(_e19, light.proj * in.world_position, t_shadow, sampler_shadow);
-        metal::float3 light_dir = metal::normalize(light.pos.xyz - in.world_position.xyz);
-        float diffuse = metal::max(0.0, metal::dot(normal_1, light_dir));
-        metal::float3 _e37 = color;
-        color = _e37 + ((_e23 * diffuse) * light.color.xyz);
+        {
+            uint _e16 = i;
+            Light light = s_lights[_e16];
+            uint _e19 = i;
+            float _e23 = fetch_shadow(_e19, light.proj * in.world_position, t_shadow, sampler_shadow);
+            metal::float3 light_dir = metal::normalize(light.pos.xyz - in.world_position.xyz);
+            float diffuse = metal::max(0.0, metal::dot(normal_1, light_dir));
+            metal::float3 _e37 = color;
+            color = _e37 + ((_e23 * diffuse) * light.color.xyz);
+        }
     }
     metal::float3 _e42 = color;
     metal::float4 _e47 = u_entity.color;
@@ -165,14 +167,16 @@ fragment fs_main_without_storageOutput fs_main_without_storage(
         } else {
             break;
         }
-        uint _e16 = i_1;
-        Light light_1 = u_lights.inner[_e16];
-        uint _e19 = i_1;
-        float _e23 = fetch_shadow(_e19, light_1.proj * in_1.world_position, t_shadow, sampler_shadow);
-        metal::float3 light_dir_1 = metal::normalize(light_1.pos.xyz - in_1.world_position.xyz);
-        float diffuse_1 = metal::max(0.0, metal::dot(normal_2, light_dir_1));
-        metal::float3 _e37 = color_1;
-        color_1 = _e37 + ((_e23 * diffuse_1) * light_1.color.xyz);
+        {
+            uint _e16 = i_1;
+            Light light_1 = u_lights.inner[_e16];
+            uint _e19 = i_1;
+            float _e23 = fetch_shadow(_e19, light_1.proj * in_1.world_position, t_shadow, sampler_shadow);
+            metal::float3 light_dir_1 = metal::normalize(light_1.pos.xyz - in_1.world_position.xyz);
+            float diffuse_1 = metal::max(0.0, metal::dot(normal_2, light_dir_1));
+            metal::float3 _e37 = color_1;
+            color_1 = _e37 + ((_e23 * diffuse_1) * light_1.color.xyz);
+        }
     }
     metal::float3 _e42 = color_1;
     metal::float4 _e47 = u_entity.color;
