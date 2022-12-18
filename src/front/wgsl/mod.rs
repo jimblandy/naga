@@ -292,10 +292,7 @@ impl<'a> Error<'a> {
             Error::UnknownScalarType(bad_span) => ParseError {
                 message: format!("unknown scalar type: '{}'", &source[bad_span]),
                 labels: vec![(bad_span, "unknown scalar type".into())],
-                notes: vec!["Valid scalar types are f16, f32, f64, \
-                             i8, i16, i32, i64, \
-                             u8, u16, u32, u64, bool"
-                    .into()],
+                notes: vec!["Valid scalar types are f32, f64, i32, u32, bool".into()],
             },
             Error::BadTextureSampleType { span, kind, width } => ParseError {
                 message: format!(
@@ -4667,16 +4664,57 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let value = args.next()?;
                             let value_span = ctx.read_expressions.get_span(value);
                             let value = self.lower_expression(value, ctx.reborrow())?;
-                            let ty = ctx.resolve_type(pointer)?;
+                            let ty = ctx.resolve_type(value)?;
 
                             args.finish()?;
 
                             let expression = match ctx.module.types[ty].inner {
                                 crate::TypeInner::Scalar { kind, width } => {
+                                    let bool_ty = ctx.module.types.insert(
+                                        crate::Type {
+                                            name: None,
+                                            inner: crate::TypeInner::Scalar {
+                                                kind: crate::ScalarKind::Bool,
+                                                width: crate::BOOL_WIDTH,
+                                            },
+                                        },
+                                        Span::UNDEFINED,
+                                    );
+                                    let scalar_ty = ctx.module.types.insert(
+                                        crate::Type {
+                                            name: None,
+                                            inner: crate::TypeInner::Scalar { kind, width },
+                                        },
+                                        Span::UNDEFINED,
+                                    );
+                                    let struct_ty = ctx.module.types.insert(
+                                        crate::Type {
+                                            name: Some(
+                                                "__atomic_compare_exchange_result".to_string(),
+                                            ),
+                                            inner: crate::TypeInner::Struct {
+                                                members: vec![
+                                                    crate::StructMember {
+                                                        name: Some("old_value".to_string()),
+                                                        ty: scalar_ty,
+                                                        binding: None,
+                                                        offset: 0,
+                                                    },
+                                                    crate::StructMember {
+                                                        name: Some("exchanged".to_string()),
+                                                        ty: bool_ty,
+                                                        binding: None,
+                                                        offset: 4,
+                                                    },
+                                                ],
+                                                span: 8,
+                                            },
+                                        },
+                                        Span::UNDEFINED,
+                                    );
                                     crate::Expression::AtomicResult {
-                                        kind,
-                                        width,
-                                        comparison: false,
+                                        ty: struct_ty,
+                                        comparison: true,
                                     }
                                 }
                                 _ => return Err(Error::InvalidAtomicOperandType(value_span)),
@@ -4864,23 +4902,18 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let pointer = self.atomic_pointer(args.next()?, ctx.reborrow())?;
 
         let value = args.next()?;
-        let value_span = ctx.read_expressions.get_span(value);
         let value = self.lower_expression(value, ctx.reborrow())?;
-
         let ty = ctx.resolve_type(value)?;
 
         args.finish()?;
 
-        let expression = match ctx.module.types[ty].inner {
-            crate::TypeInner::Scalar { kind, width } => crate::Expression::AtomicResult {
-                kind,
-                width,
+        let result = ctx.interrupt_emitter(
+            crate::Expression::AtomicResult {
+                ty,
                 comparison: false,
             },
-            _ => return Err(Error::InvalidAtomicOperandType(value_span)),
-        };
-
-        let result = ctx.interrupt_emitter(expression, span);
+            span,
+        );
         ctx.block.push(
             crate::Statement::Atomic {
                 pointer,

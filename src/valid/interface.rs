@@ -2,7 +2,7 @@ use super::{
     analyzer::{FunctionInfo, GlobalUse},
     Capabilities, Disalignment, FunctionError, ModuleInfo,
 };
-use crate::arena::{BadHandle, Handle, UniqueArena};
+use crate::arena::{Handle, UniqueArena};
 
 use crate::span::{AddSpan as _, MapErrWithSpan as _, SpanProvider as _, WithSpan};
 use bit_set::BitSet;
@@ -12,8 +12,6 @@ const MAX_WORKGROUP_SIZE: u32 = 0x4000;
 
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum GlobalVariableError {
-    #[error(transparent)]
-    BadHandle(#[from] BadHandle),
     #[error("Usage isn't compatible with address space {0:?}")]
     InvalidUsage(crate::AddressSpace),
     #[error("Type isn't compatible with address space {0:?}")]
@@ -102,6 +100,7 @@ fn storage_usage(access: crate::StorageAccess) -> GlobalUse {
 struct VaryingContext<'a> {
     stage: crate::ShaderStage,
     output: bool,
+    flags: super::ValidationFlags,
     types: &'a UniqueArena<crate::Type>,
     type_info: &'a Vec<super::r#type::TypeInfo>,
     location_mask: &'a mut BitSet,
@@ -284,7 +283,10 @@ impl VaryingContext<'_> {
                     return Err(VaryingError::NotIOShareableType(ty));
                 }
                 if !self.location_mask.insert(location as usize) {
-                    return Err(VaryingError::BindingCollision { location });
+                    #[cfg(feature = "validate")]
+                    if self.flags.contains(super::ValidationFlags::BINDINGS) {
+                        return Err(VaryingError::BindingCollision { location });
+                    }
                 }
 
                 let needs_interpolation = match self.stage {
@@ -335,9 +337,15 @@ impl VaryingContext<'_> {
                         for (index, member) in members.iter().enumerate() {
                             let span_context = self.types.get_span_context(ty);
                             match member.binding {
-                                None => {
-                                    return Err(VaryingError::MemberMissingBinding(index as u32)
-                                        .with_span_context(span_context))
+                                None =>
+                                {
+                                    #[cfg(feature = "validate")]
+                                    if self.flags.contains(super::ValidationFlags::BINDINGS) {
+                                        return Err(VaryingError::MemberMissingBinding(
+                                            index as u32,
+                                        )
+                                        .with_span_context(span_context));
+                                    }
                                 }
                                 // TODO: shouldn't this be validate?
                                 Some(ref binding) => self
@@ -346,7 +354,13 @@ impl VaryingContext<'_> {
                             }
                         }
                     }
-                    _ => return Err(VaryingError::MissingBinding.with_span()),
+                    _ =>
+                    {
+                        #[cfg(feature = "validate")]
+                        if self.flags.contains(super::ValidationFlags::BINDINGS) {
+                            return Err(VaryingError::MissingBinding.with_span());
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -364,10 +378,7 @@ impl super::Validator {
         use super::TypeFlags;
 
         log::debug!("var {:?}", var);
-        let type_info = self.types.get(var.ty.index()).ok_or_else(|| BadHandle {
-            kind: "type",
-            index: var.ty.index(),
-        })?;
+        let type_info = &self.types[var.ty.index()];
 
         let (required_type_flags, is_resource) = match var.space {
             crate::AddressSpace::Function => {
@@ -441,7 +452,9 @@ impl super::Validator {
         }
 
         if is_resource != var.binding.is_some() {
-            return Err(GlobalVariableError::InvalidBinding);
+            if self.flags.contains(super::ValidationFlags::BINDINGS) {
+                return Err(GlobalVariableError::InvalidBinding);
+            }
         }
 
         Ok(())
@@ -497,6 +510,7 @@ impl super::Validator {
             let mut ctx = VaryingContext {
                 stage: ep.stage,
                 output: false,
+                flags: self.flags,
                 types: &module.types,
                 type_info: &self.types,
                 location_mask: &mut self.location_mask,
@@ -513,6 +527,7 @@ impl super::Validator {
             let mut ctx = VaryingContext {
                 stage: ep.stage,
                 output: true,
+                flags: self.flags,
                 types: &module.types,
                 type_info: &self.types,
                 location_mask: &mut self.location_mask,
@@ -571,8 +586,10 @@ impl super::Validator {
                     self.bind_group_masks.push(BitSet::new());
                 }
                 if !self.bind_group_masks[bind.group as usize].insert(bind.binding as usize) {
-                    return Err(EntryPointError::BindingCollision(var_handle)
-                        .with_span_handle(var_handle, &module.global_variables));
+                    if self.flags.contains(super::ValidationFlags::BINDINGS) {
+                        return Err(EntryPointError::BindingCollision(var_handle)
+                            .with_span_handle(var_handle, &module.global_variables));
+                    }
                 }
             }
         }
