@@ -151,7 +151,11 @@ pub enum Error<'a> {
     InconsistentBinding(Span),
     TypeNotConstructible(Span),
     TypeNotInferrable(Span),
-    InitializationTypeMismatch(Span, String, String),
+    InitializationTypeMismatch {
+        name: Span,
+        expected: String,
+        got: String,
+    },
     MissingType(Span),
     MissingAttribute(&'static str, Span),
     InvalidAtomicPointer(Span),
@@ -462,19 +466,18 @@ impl<'a> Error<'a> {
                 labels: vec![(span, "type can't be inferred".into())],
                 notes: vec![],
             },
-            Error::InitializationTypeMismatch(name_span, ref expected_ty, ref got_ty) => {
-                ParseError {
-                    message: format!(
-                        "the type of `{}` is expected to be `{}`, but got `{}`",
-                        &source[name_span], expected_ty, got_ty,
-                    ),
-                    labels: vec![(
-                        name_span,
-                        format!("definition of `{}`", &source[name_span]).into(),
-                    )],
-                    notes: vec![],
-                }
-            }
+            Error::InitializationTypeMismatch {
+                name,
+                ref expected,
+                ref got,
+            } => ParseError {
+                message: format!(
+                    "the type of `{}` is expected to be `{}`, but got `{}`",
+                    &source[name], expected, got,
+                ),
+                labels: vec![(name, format!("definition of `{}`", &source[name]).into())],
+                notes: vec![],
+            },
             Error::MissingType(name_span) => ParseError {
                 message: format!("variable `{}` needs a type", &source[name_span]),
                 labels: vec![(
@@ -3680,7 +3683,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     if let Some(explicit) = explicit_ty {
                         if explicit != inferred_type {
                             let ty = &ctx.module.types[explicit];
-                            let explicit = ty.name.clone().unwrap_or_else(|| {
+                            let expected = ty.name.clone().unwrap_or_else(|| {
                                 ty.inner.to_wgsl(&ctx.module.types, &ctx.module.constants)
                             });
 
@@ -3689,11 +3692,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 ty.inner.to_wgsl(&ctx.module.types, &ctx.module.constants)
                             });
 
-                            return Err(Error::InitializationTypeMismatch(
-                                c.name.span,
-                                explicit,
-                                inferred,
-                            ));
+                            return Err(Error::InitializationTypeMismatch {
+                                name: c.name.span,
+                                expected,
+                                got: inferred,
+                            });
                         }
                     }
 
@@ -3842,11 +3845,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             .inner
                             .equivalent(&ctx.module.types[init_ty].inner, &ctx.module.types)
                         {
-                            return Err(Error::InitializationTypeMismatch(
-                                l.name.span,
-                                ctx.fmt_ty(ty),
-                                ctx.fmt_ty(init_ty),
-                            ));
+                            return Err(Error::InitializationTypeMismatch {
+                                name: l.name.span,
+                                expected: ctx.fmt_ty(ty),
+                                got: ctx.fmt_ty(init_ty),
+                            });
                         }
                     }
 
@@ -3886,11 +3889,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 .inner
                                 .equivalent(&ctx.module.types[inferred].inner, &ctx.module.types)
                             {
-                                return Err(Error::InitializationTypeMismatch(
-                                    v.name.span,
-                                    ctx.fmt_ty(explicit),
-                                    ctx.fmt_ty(inferred),
-                                ));
+                                return Err(Error::InitializationTypeMismatch {
+                                    name: v.name.span,
+                                    expected: ctx.fmt_ty(explicit),
+                                    got: ctx.fmt_ty(inferred),
+                                });
                             }
                             explicit
                         }
