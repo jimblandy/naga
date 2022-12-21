@@ -68,7 +68,11 @@ struct ResolvedDependency<'a> {
 
 /// Local state for ordering a `TranslationUnit`'s module-scope declarations.
 ///
-/// Values of this type are used temporarily by `Index::generate`.
+/// Values of this type are used temporarily by `Index::generate`
+/// to perform a depth-first sort on the declarations.
+/// Technically, what we want is a topological sort, but a depth-first sort
+/// has one key benefit - it's much more efficient in storing
+/// the path of each node for error generation.
 struct DependencySolver<'source, 'temp> {
     /// A map from module-scope definitions' names to their handles.
     globals: &'temp FastHashMap<&'source str, Handle<ast::GlobalDecl<'source>>>,
