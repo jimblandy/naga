@@ -164,7 +164,7 @@ pub enum Error<'a> {
         ty: InvalidAssignmentType,
     },
     ReservedKeyword(Span),
-    /// Redefinition of a module-scope identifier.
+    /// Redefinition of an identifier (used for both module-scope and local redefinitions).
     Redefinition {
         /// Span of the identifier in the previous definition.
         previous: Span,
