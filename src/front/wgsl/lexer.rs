@@ -6,6 +6,21 @@ fn consume_any(input: &str, what: impl Fn(char) -> bool) -> (&str, &str) {
     input.split_at(pos)
 }
 
+/// Return the token at the start of `input`.
+///
+/// If `generic` is `false`, then the bit shift operators `>>` or `<<`
+/// are valid lookahead tokens for the current parser state (see [§3.1
+/// Parsing] in the WGSL specification). In other words:
+///
+/// -   If `generic` is `true`, then we are expecting an angle bracket
+///     around a generic type parameter, like the `<` and `>` in
+///     `vec3<f32>`, so interpret `<` and `>` as `Token::Paren` tokens,
+///     even if they're part of `<<` or `>>` sequences.
+///
+/// -   Otherwise, interpret `<<` and `>>` as shift operators:
+///     `Token::LogicalOperation` tokens.
+///
+/// [§3.1 Parsing]: https://gpuweb.github.io/gpuweb/wgsl/#parsing
 fn consume_token(input: &str, generic: bool) -> (Token<'_>, &str) {
     let mut chars = input.chars();
     let cur = match chars.next() {
@@ -223,16 +238,27 @@ impl<'a> Lexer<'a> {
         Span::from(offset..self.last_end_offset)
     }
 
+    /// Return the next non-whitespace token from `self`.
+    ///
+    /// Assume we are a parse state where bit shift operators may
+    /// occur, but not angle brackets.
     #[must_use]
     pub(super) fn next(&mut self) -> TokenSpan<'a> {
         self.next_impl(false)
     }
 
+    /// Return the next non-whitespace token from `self`.
+    ///
+    /// Assume we are in a parse state where angle brackets may occur,
+    /// but not bit shift operators.
     #[must_use]
     pub(super) fn next_generic(&mut self) -> TokenSpan<'a> {
         self.next_impl(true)
     }
 
+    /// Return the next non-whitespace token from `self`, with a span.
+    ///
+    /// See [`consume_token`] for the meaning of `generic`.
     fn next_impl(&mut self, generic: bool) -> TokenSpan<'a> {
         let mut start_byte_offset = self.current_byte_offset();
         loop {

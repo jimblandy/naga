@@ -21,9 +21,18 @@ pub enum IdentExpr<'a> {
     Local(Handle<Local>),
 }
 
+/// A reference to a module-scope definition or predeclared object.
+///
+/// Each [`GlobalDecl`] holds a set of these values, to be resolved to
+/// specific definitions later. To support de-duplication, `Eq` and
+/// `Hash` on a `Dependency` value consider only the name, not the
+/// source location at which the reference occurs.
 #[derive(Debug)]
 pub struct Dependency<'a> {
+    /// The name referred to.
     pub ident: &'a str,
+
+    /// The location at which the reference to that name occurs.
     pub usage: Span,
 }
 
@@ -41,9 +50,13 @@ impl PartialEq for Dependency<'_> {
 
 impl Eq for Dependency<'_> {}
 
+/// A module-scope declaration.
 #[derive(Debug)]
 pub struct GlobalDecl<'a> {
     pub kind: GlobalDeclKind<'a>,
+
+    /// Names of all module-scope or predeclared objects this
+    /// declaration uses.
     pub dependencies: FastHashSet<Dependency<'a>>,
 }
 

@@ -164,16 +164,34 @@ pub enum Error<'a> {
         ty: InvalidAssignmentType,
     },
     ReservedKeyword(Span),
+    /// Redefinition of a module-scope identifier.
     Redefinition {
+        /// Span of the identifier in the previous definition.
         previous: Span,
+
+        /// Span of the identifier in the new definition.
         current: Span,
     },
+    /// A declaration refers to itself directly.
     RecursiveDeclaration {
+        /// The location of the name of the declaration.
         ident: Span,
+
+        /// The point at which it is used.
         usage: Span,
     },
+    /// A declaration refers to itself indirectly, through one or more other
+    /// definitions.
     CyclicDeclaration {
+        /// The location of the name of some declaration in the cycle.
         ident: Span,
+
+        /// The edges of the cycle of references.
+        ///
+        /// Each `(decl, reference)` pair indicates that the declaration whose
+        /// name is `decl` has an identifier at `reference` whose definition is
+        /// the next declaration in the cycle. The last pair's `reference` is
+        /// the same identifier as `ident`, above.
         path: Vec<(Span, Span)>,
     },
     ConstExprUnsupported(Span),
