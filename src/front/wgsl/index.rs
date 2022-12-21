@@ -58,12 +58,12 @@ impl<'a> Index<'a> {
 ///
 /// This is like `ast::Dependency`, except that we've determined which
 /// `GlobalDecl` it refers to.
-pub struct ResolvedDependency<'a> {
+struct ResolvedDependency<'a> {
     /// The referent of some identifier used in the current declaration.
-    pub decl: Handle<ast::GlobalDecl<'a>>,
+    decl: Handle<ast::GlobalDecl<'a>>,
 
     /// Where that use occurs within the current declaration.
-    pub usage: Span,
+    usage: Span,
 }
 
 /// Local state for ordering a `TranslationUnit`'s module-scope declarations.
@@ -94,7 +94,7 @@ struct DependencySolver<'source, 'temp> {
 impl<'a> DependencySolver<'a, '_> {
     /// Produce the sorted list of declaration handles, and check for cycles.
     fn solve(mut self) -> Result<Vec<Handle<ast::GlobalDecl<'a>>>, Error<'a>> {
-        for id in self.module.decls.iter().map(|x| x.0) {
+        for (id, _) in self.module.decls.iter() {
             if self.visited[id.index()] {
                 continue;
             }
@@ -110,10 +110,6 @@ impl<'a> DependencySolver<'a, '_> {
     fn dfs(&mut self, id: Handle<ast::GlobalDecl<'a>>) -> Result<(), Error<'a>> {
         let decl = &self.module.decls[id];
         let id_usize = id.index();
-
-        if self.visited[id_usize] {
-            return Ok(());
-        }
 
         self.temp_visited[id_usize] = true;
         for dep in decl.dependencies.iter() {
@@ -141,8 +137,7 @@ impl<'a> DependencySolver<'a, '_> {
                             .iter()
                             .rev()
                             .enumerate()
-                            .find(|&(_, dep)| dep.decl == dep_id)
-                            .map(|x| x.0)
+                            .find_map(|(i, dep)| (dep.decl == dep_id).then_some(i))
                             .unwrap_or(0);
 
                         Err(Error::CyclicDeclaration {

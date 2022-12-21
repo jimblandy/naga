@@ -585,7 +585,10 @@ impl<'a> Error<'a> {
             Error::ConstExprUnsupported(span) => ParseError {
                 message: "this constant expression is not supported".to_string(),
                 labels: vec![(span, "expression is not supported".into())],
-                notes: vec!["this should be fixed in a future version of Naga".into()],
+                notes: vec![
+                    "this should be fixed in a future version of Naga".into(),
+                    "https://github.com/gfx-rs/naga/issues/1829".into(),
+                ],
             },
             Error::InvalidSwitchValue { uint, span } => ParseError {
                 message: "invalid switch value".to_string(),
@@ -3661,7 +3664,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         crate::ConstantInner::Composite { ty, .. } => ty,
                     };
 
-                    let handle = ctx.module.constants.fetch_or_append(
+                    let handle = ctx.module.constants.append(
                         crate::Constant {
                             name: Some(c.name.name.to_string()),
                             specialization: None,
