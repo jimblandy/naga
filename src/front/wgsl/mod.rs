@@ -1001,7 +1001,11 @@ struct OutputContext<'source, 'temp, 'out> {
     read_expressions: Option<&'temp Arena<ast::Expression<'source>>>,
     global_expressions: &'temp Arena<ast::Expression<'source>>,
     globals: &'temp mut FastHashMap<&'source str, GlobalDecl>,
+
+    /// Anonymous types.
     types: &'temp Arena<ast::Type<'source>>,
+    
+    /// The module we're constructing.
     module: &'out mut crate::Module,
 }
 
@@ -1873,6 +1877,11 @@ impl Parser {
             }
             // everything else must be handled later, since they can be hidden by user-defined functions.
             _ => {
+                ctx.unresolved.insert(ast::Dependency {
+                    ident: name,
+                    usage: name_span,
+                });
+
                 let arguments = self.parse_arguments(lexer, ctx.reborrow())?;
                 ast::Expression::Call {
                     function: ast::Ident {
@@ -2635,7 +2644,13 @@ impl Parser {
 
         let ty = match self.parse_type_decl_impl(lexer, name, ctx.reborrow())? {
             Some(ty) => ty,
-            None => ast::Type::User(ast::Ident { name, span }),
+            None => {
+                ctx.unresolved.insert(ast::Dependency {
+                    ident: name,
+                    usage: span,
+                });
+                ast::Type::User(ast::Ident { name, span })
+            },
         };
 
         self.pop_rule_span(lexer);
@@ -5156,6 +5171,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         Ok(handle)
     }
 
+    /// Return a Naga `Handle<Type>` representing the front-end type `handle`.
     fn resolve_ast_type(
         &mut self,
         handle: Handle<ast::Type<'source>>,

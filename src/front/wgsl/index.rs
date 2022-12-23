@@ -2,6 +2,7 @@ use super::{ast, Error};
 use crate::{FastHashMap, Handle, Span};
 
 /// A `GlobalDecl` list in which each definition occurs before all its uses.
+#[derive(Debug)]
 pub struct Index<'a> {
     dependency_order: Vec<Handle<ast::GlobalDecl<'a>>>,
 }

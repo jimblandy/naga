@@ -6,6 +6,11 @@ use std::hash::Hash;
 pub struct TranslationUnit<'a> {
     pub decls: Arena<GlobalDecl<'a>>,
     pub global_expressions: Arena<Expression<'a>>,
+
+    /// Non-user-defined types, like `vec4<f32>` or `array<i32, 10>`.
+    ///
+    /// These are referred to by `Handle<ast::Type<'a>>` values.
+    /// User-defined types are referred to by name until lowering.
     pub types: Arena<Type<'a>>,
 }
 
@@ -144,6 +149,7 @@ pub enum ArraySize<'a> {
     Dynamic,
 }
 
+/// A type in which identifiers have not been resolved to their referents.
 #[derive(Debug)]
 pub enum Type<'a> {
     Scalar {
