@@ -2767,6 +2767,7 @@ impl<W: Write> Writer<W> {
                     // done
                     writeln!(self.out, ";")?;
                 }
+                crate::Statement::RayQuery { .. } => unreachable!(),
             }
         }
 
