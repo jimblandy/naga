@@ -796,18 +796,6 @@ pub enum TypeInner {
     BindingArray { base: Handle<Type>, size: ArraySize },
 }
 
-/// Constant value.
-#[derive(Debug, PartialEq)]
-#[cfg_attr(feature = "clone", derive(Clone))]
-#[cfg_attr(feature = "serialize", derive(Serialize))]
-#[cfg_attr(feature = "deserialize", derive(Deserialize))]
-#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
-pub struct Constant {
-    pub name: Option<String>,
-    pub specialization: Option<u32>,
-    pub inner: ConstantInner,
-}
-
 #[derive(Debug, Clone, Copy, PartialOrd)]
 #[cfg_attr(feature = "serialize", derive(Serialize))]
 #[cfg_attr(feature = "deserialize", derive(Deserialize))]
@@ -846,6 +834,18 @@ pub enum ConstantInner {
         ty: Handle<Type>,
         components: Vec<Handle<Constant>>,
     },
+}
+
+/// Constant value.
+#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "clone", derive(Clone))]
+#[cfg_attr(feature = "serialize", derive(Serialize))]
+#[cfg_attr(feature = "deserialize", derive(Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+pub struct Constant {
+    pub name: Option<String>,
+    pub specialization: Option<u32>,
+    pub inner: ConstantInner,
 }
 
 /// Describes how an input/output variable is to be bound.
@@ -1224,6 +1224,11 @@ pub enum Expression {
     Constant(Handle<Constant>),
     /// Zero value of a type.
     ZeroValue(Handle<Type>),
+    /// Composite expression.
+    Compose {
+        ty: Handle<Type>,
+        components: Vec<Handle<Expression>>,
+    },
 
     /// Array access with a computed index.
     ///
@@ -1293,11 +1298,6 @@ pub enum Expression {
         size: VectorSize,
         vector: Handle<Expression>,
         pattern: [SwizzleComponent; 4],
-    },
-    /// Composite expression.
-    Compose {
-        ty: Handle<Type>,
-        components: Vec<Handle<Expression>>,
     },
 
     /// Reference a function parameter, by its index.

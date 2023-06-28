@@ -222,18 +222,18 @@ impl super::Validator {
             crate::Expression::AccessIndex { base, .. } => {
                 handle.check_dep(base)?;
             }
+            crate::Expression::Splat { value, .. } => {
+                handle.check_dep(value)?;
+            }
+            crate::Expression::Swizzle { vector, .. } => {
+                handle.check_dep(vector)?;
+            }
             crate::Expression::Literal(_value) => {}
             crate::Expression::Constant(constant) => {
                 validate_constant(constant)?;
             }
             crate::Expression::ZeroValue(ty) => {
                 validate_type(ty)?;
-            }
-            crate::Expression::Splat { value, .. } => {
-                handle.check_dep(value)?;
-            }
-            crate::Expression::Swizzle { vector, .. } => {
-                handle.check_dep(vector)?;
             }
             crate::Expression::Compose { ty, ref components } => {
                 validate_type(ty)?;
