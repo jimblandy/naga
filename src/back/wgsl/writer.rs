@@ -708,14 +708,11 @@ impl<W: Write> Writer<W> {
             Statement::Store { pointer, value } => {
                 write!(self.out, "{level}")?;
 
-                let is_atomic = match *func_ctx.resolve_type(pointer, &module.types) {
-                    crate::TypeInner::Pointer { base, .. } => match module.types[base].inner {
-                        crate::TypeInner::Atomic { .. } => true,
-                        _ => false,
-                    },
-                    _ => false,
-                };
-                if is_atomic {
+                let is_atomic_pointer = func_ctx
+                    .resolve_type(pointer, &module.types)
+                    .is_atomic_pointer(&module.types);
+
+                if is_atomic_pointer {
                     write!(self.out, "atomicStore(")?;
                     self.write_expr(module, pointer, func_ctx)?;
                     write!(self.out, ", ")?;
@@ -1424,15 +1421,11 @@ impl<W: Write> Writer<W> {
                 write!(self.out, ")")?;
             }
             Expression::Load { pointer } => {
-                let is_atomic = match *func_ctx.resolve_type(pointer, &module.types) {
-                    crate::TypeInner::Pointer { base, .. } => match module.types[base].inner {
-                        crate::TypeInner::Atomic { .. } => true,
-                        _ => false,
-                    },
-                    _ => false,
-                };
+                let is_atomic_pointer = func_ctx
+                    .resolve_type(pointer, &module.types)
+                    .is_atomic_pointer(&module.types);
 
-                if is_atomic {
+                if is_atomic_pointer {
                     write!(self.out, "atomicLoad(")?;
                     self.write_expr(module, pointer, func_ctx)?;
                     write!(self.out, ")")?;

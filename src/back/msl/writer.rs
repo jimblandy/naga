@@ -2270,15 +2270,11 @@ impl<W: Write> Writer<W> {
         policy: index::BoundsCheckPolicy,
         context: &ExpressionContext,
     ) -> BackendResult {
-        let is_atomic = match *context.resolve_type(pointer) {
-            crate::TypeInner::Pointer { base, .. } => match context.module.types[base].inner {
-                crate::TypeInner::Atomic { .. } => true,
-                _ => false,
-            },
-            _ => false,
-        };
+        let is_atomic_pointer = context
+            .resolve_type(pointer)
+            .is_atomic_pointer(&context.module.types);
 
-        if is_atomic {
+        if is_atomic_pointer {
             write!(
                 self.out,
                 "{NAMESPACE}::atomic_load_explicit({ATOMIC_REFERENCE}"
@@ -2991,18 +2987,12 @@ impl<W: Write> Writer<W> {
         level: back::Level,
         context: &StatementContext,
     ) -> BackendResult {
-        let pointer_inner = context.expression.resolve_type(pointer);
-        let is_atomic = match *pointer_inner {
-            crate::TypeInner::Pointer { base, .. } => {
-                match context.expression.module.types[base].inner {
-                    crate::TypeInner::Atomic { .. } => true,
-                    _ => false,
-                }
-            }
-            _ => false,
-        };
+        let is_atomic_pointer = context
+            .expression
+            .resolve_type(pointer)
+            .is_atomic_pointer(&context.expression.module.types);
 
-        if is_atomic {
+        if is_atomic_pointer {
             write!(
                 self.out,
                 "{level}{NAMESPACE}::atomic_store_explicit({ATOMIC_REFERENCE}"

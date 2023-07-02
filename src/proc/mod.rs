@@ -209,6 +209,16 @@ impl super::TypeInner {
         }
     }
 
+    pub fn is_atomic_pointer(&self, types: &crate::UniqueArena<crate::Type>) -> bool {
+        match *self {
+            crate::TypeInner::Pointer { base, .. } => match types[base].inner {
+                crate::TypeInner::Atomic { .. } => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// Get the size of this type.
     pub fn size(&self, _gctx: GlobalCtx) -> u32 {
         match *self {
