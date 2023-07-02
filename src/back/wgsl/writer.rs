@@ -708,7 +708,7 @@ impl<W: Write> Writer<W> {
             Statement::Store { pointer, value } => {
                 write!(self.out, "{level}")?;
 
-                let is_atomic = match *func_ctx.info[pointer].ty.inner_with(&module.types) {
+                let is_atomic = match *func_ctx.resolve_type(pointer, &module.types) {
                     crate::TypeInner::Pointer { base, .. } => match module.types[base].inner {
                         crate::TypeInner::Atomic { .. } => true,
                         _ => false,
@@ -987,7 +987,7 @@ impl<W: Write> Writer<W> {
                 }
             }
             Ex::Access { base, .. } | Ex::AccessIndex { base, .. } => {
-                let base_ty = func_ctx.info[base].ty.inner_with(&module.types);
+                let base_ty = func_ctx.resolve_type(base, &module.types);
                 match *base_ty {
                     crate::TypeInner::Pointer { .. } | crate::TypeInner::ValuePointer { .. } => {
                         Indirection::Reference
@@ -1282,7 +1282,7 @@ impl<W: Write> Writer<W> {
                 };
 
                 write!(self.out, "textureGather{suffix_cmp}(")?;
-                match *func_ctx.info[image].ty.inner_with(&module.types) {
+                match *func_ctx.resolve_type(image, &module.types) {
                     TypeInner::Image {
                         class: crate::ImageClass::Depth { multi: _ },
                         ..
@@ -1362,7 +1362,7 @@ impl<W: Write> Writer<W> {
                 kind,
                 convert,
             } => {
-                let inner = func_ctx.info[expr].ty.inner_with(&module.types);
+                let inner = func_ctx.resolve_type(expr, &module.types);
                 match *inner {
                     TypeInner::Matrix {
                         columns,
@@ -1407,7 +1407,7 @@ impl<W: Write> Writer<W> {
                 write!(self.out, ")")?;
             }
             Expression::Splat { size, value } => {
-                let inner = func_ctx.info[value].ty.inner_with(&module.types);
+                let inner = func_ctx.resolve_type(value, &module.types);
                 let (scalar_kind, scalar_width) = match *inner {
                     crate::TypeInner::Scalar { kind, width } => (kind, width),
                     _ => {
@@ -1424,7 +1424,7 @@ impl<W: Write> Writer<W> {
                 write!(self.out, ")")?;
             }
             Expression::Load { pointer } => {
-                let is_atomic = match *func_ctx.info[pointer].ty.inner_with(&module.types) {
+                let is_atomic = match *func_ctx.resolve_type(pointer, &module.types) {
                     crate::TypeInner::Pointer { base, .. } => match module.types[base].inner {
                         crate::TypeInner::Atomic { .. } => true,
                         _ => false,
@@ -1576,7 +1576,7 @@ impl<W: Write> Writer<W> {
                 let unary = match op {
                     crate::UnaryOperator::Negate => "-",
                     crate::UnaryOperator::Not => {
-                        match *func_ctx.info[expr].ty.inner_with(&module.types) {
+                        match *func_ctx.resolve_type(expr, &module.types) {
                             TypeInner::Scalar {
                                 kind: crate::ScalarKind::Bool,
                                 ..
