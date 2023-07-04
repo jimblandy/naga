@@ -604,8 +604,6 @@ impl<'a, W: Write> Writer<'a, W> {
             }
         }
 
-        let ep_info = self.info.get_entry_point(self.entry_point_idx as usize);
-
         // Write struct types.
         //
         // This are always ordered because the IR is structured in a way that
@@ -626,6 +624,8 @@ impl<'a, W: Write> Writer<'a, W> {
                 }
             }
         }
+
+        let ep_info = self.info.get_entry_point(self.entry_point_idx as usize);
 
         // Write the globals
         //
