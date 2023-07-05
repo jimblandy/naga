@@ -159,10 +159,7 @@ impl<'a, W: Write> super::Writer<'a, W> {
     /// <https://docs.microsoft.com/en-us/windows/win32/direct3dhlsl/sm5-object-rwbyteaddressbuffer-getdimensions>
     pub(super) fn write_wrapped_array_length_function(
         &mut self,
-        module: &crate::Module,
         wal: WrappedArrayLength,
-        expr_handle: Handle<crate::Expression>,
-        func_ctx: &FunctionCtx,
     ) -> BackendResult {
         use crate::back::INDENT;
 
@@ -170,9 +167,7 @@ impl<'a, W: Write> super::Writer<'a, W> {
         const RETURN_VARIABLE_NAME: &str = "ret";
 
         // Write function return type and name
-        let ret_ty = func_ctx.info[expr_handle].ty.inner_with(&module.types);
-        self.write_value_type(module, ret_ty)?;
-        write!(self.out, " ")?;
+        write!(self.out, "uint ")?;
         self.write_wrapped_array_length_function_name(wal)?;
 
         // Write function parameters
@@ -817,7 +812,7 @@ impl<'a, W: Write> super::Writer<'a, W> {
                     };
 
                     if !self.wrapped.array_lengths.contains(&wal) {
-                        self.write_wrapped_array_length_function(module, wal, handle, func_ctx)?;
+                        self.write_wrapped_array_length_function(wal)?;
                         self.wrapped.array_lengths.insert(wal);
                     }
                 }
