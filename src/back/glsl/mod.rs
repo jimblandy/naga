@@ -2236,6 +2236,40 @@ impl<'a, W: Write> Writer<'a, W> {
         }
 
         match ctx.expressions[expr] {
+            Expression::Literal(literal) => {
+                match literal {
+                    // Floats are written using `Debug` instead of `Display` because it always appends the
+                    // decimal part even it's zero which is needed for a valid glsl float constant
+                    crate::Literal::F64(value) => write!(self.out, "{:?}LF", value)?,
+                    crate::Literal::F32(value) => write!(self.out, "{:?}", value)?,
+                    // Unsigned integers need a `u` at the end
+                    //
+                    // While `core` doesn't necessarily need it, it's allowed and since `es` needs it we
+                    // always write it as the extra branch wouldn't have any benefit in readability
+                    crate::Literal::U32(value) => write!(self.out, "{}u", value)?,
+                    crate::Literal::I32(value) => write!(self.out, "{}", value)?,
+                    crate::Literal::Bool(value) => write!(self.out, "{}", value)?,
+                }
+            }
+            // Constants are delegated to `write_constant`
+            Expression::Constant(constant) => self.write_constant(constant)?,
+            Expression::ZeroValue(ty) => {
+                self.write_zero_init_value(ty)?;
+            }
+            // `Compose` is pretty simple we just write `type(components)` where `components` is a
+            // comma separated list of expressions
+            Expression::Compose { ty, ref components } => {
+                self.write_type(ty)?;
+
+                let resolved = ctx.info[expr].ty.inner_with(&self.module.types);
+                if let TypeInner::Array { base, size, .. } = *resolved {
+                    self.write_array_size(base, size)?;
+                }
+
+                write!(self.out, "(")?;
+                self.write_slice(components, |this, _, arg| this.write_expr(*arg, ctx))?;
+                write!(self.out, ")")?
+            }
             // `Access` is applied to arrays, vectors and matrices and is written as indexing
             Expression::Access { base, index } => {
                 self.write_expr(base, ctx)?;
@@ -2281,26 +2315,6 @@ impl<'a, W: Write> Writer<'a, W> {
                     ref other => return Err(Error::Custom(format!("Cannot index {other:?}"))),
                 }
             }
-            // Constants are delegated to `write_constant`
-            Expression::Constant(constant) => self.write_constant(constant)?,
-            Expression::ZeroValue(ty) => {
-                self.write_zero_init_value(ty)?;
-            }
-            Expression::Literal(literal) => {
-                match literal {
-                    // Floats are written using `Debug` instead of `Display` because it always appends the
-                    // decimal part even it's zero which is needed for a valid glsl float constant
-                    crate::Literal::F64(value) => write!(self.out, "{:?}LF", value)?,
-                    crate::Literal::F32(value) => write!(self.out, "{:?}", value)?,
-                    // Unsigned integers need a `u` at the end
-                    //
-                    // While `core` doesn't necessarily need it, it's allowed and since `es` needs it we
-                    // always write it as the extra branch wouldn't have any benefit in readability
-                    crate::Literal::U32(value) => write!(self.out, "{}u", value)?,
-                    crate::Literal::I32(value) => write!(self.out, "{}", value)?,
-                    crate::Literal::Bool(value) => write!(self.out, "{}", value)?,
-                }
-            }
             // `Splat` needs to actually write down a vector, it's not always inferred in GLSL.
             Expression::Splat { size: _, value } => {
                 let resolved = ctx.info[expr].ty.inner_with(&self.module.types);
@@ -2320,20 +2334,6 @@ impl<'a, W: Write> Writer<'a, W> {
                 for &sc in pattern[..size as usize].iter() {
                     self.out.write_char(back::COMPONENTS[sc as usize])?;
                 }
-            }
-            // `Compose` is pretty simple we just write `type(components)` where `components` is a
-            // comma separated list of expressions
-            Expression::Compose { ty, ref components } => {
-                self.write_type(ty)?;
-
-                let resolved = ctx.info[expr].ty.inner_with(&self.module.types);
-                if let TypeInner::Array { base, size, .. } = *resolved {
-                    self.write_array_size(base, size)?;
-                }
-
-                write!(self.out, "(")?;
-                self.write_slice(components, |this, _, arg| this.write_expr(*arg, ctx))?;
-                write!(self.out, ")")?
             }
             // Function arguments are written as the argument name
             Expression::FunctionArgument(pos) => {
