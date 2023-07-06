@@ -811,9 +811,8 @@ impl<'a, W: Write> super::Writer<'a, W> {
                         writable: storage_access.contains(crate::StorageAccess::STORE),
                     };
 
-                    if !self.wrapped.array_lengths.contains(&wal) {
+                    if self.wrapped.array_lengths.insert(wal) {
                         self.write_wrapped_array_length_function(wal)?;
-                        self.wrapped.array_lengths.insert(wal);
                     }
                 }
                 crate::Expression::ImageQuery { image, query } => {
@@ -831,9 +830,8 @@ impl<'a, W: Write> super::Writer<'a, W> {
                         _ => unreachable!("we only query images"),
                     };
 
-                    if !self.wrapped.image_queries.contains(&wiq) {
+                    if self.wrapped.image_queries.insert(wiq) {
                         self.write_wrapped_image_query_function(module, wiq, handle, func_ctx)?;
-                        self.wrapped.image_queries.insert(wiq);
                     }
                 }
                 // Write `WrappedConstructor` for structs that are loaded from `AddressSpace::Storage`
@@ -862,19 +860,18 @@ impl<'a, W: Write> super::Writer<'a, W> {
                                 }
 
                                 let constructor = WrappedConstructor { ty };
-                                if !writer.wrapped.constructors.contains(&constructor) {
+                                if writer.wrapped.constructors.insert(constructor) {
                                     writer
                                         .write_wrapped_constructor_function(module, constructor)?;
-                                    writer.wrapped.constructors.insert(constructor);
                                 }
                             }
                             crate::TypeInner::Array { base, .. } => {
                                 write_wrapped_constructor(writer, base, module)?;
+
                                 let constructor = WrappedConstructor { ty };
-                                if !writer.wrapped.constructors.contains(&constructor) {
+                                if writer.wrapped.constructors.insert(constructor) {
                                     writer
                                         .write_wrapped_constructor_function(module, constructor)?;
-                                    writer.wrapped.constructors.insert(constructor);
                                 }
                             }
                             _ => {}
@@ -920,7 +917,7 @@ impl<'a, W: Write> super::Writer<'a, W> {
                                 let ty = base_ty_handle.unwrap();
                                 let access = WrappedStructMatrixAccess { ty, index };
 
-                                if !self.wrapped.struct_matrix_access.contains(&access) {
+                                if self.wrapped.struct_matrix_access.insert(access) {
                                     self.write_wrapped_struct_matrix_get_function(module, access)?;
                                     self.write_wrapped_struct_matrix_set_function(module, access)?;
                                     self.write_wrapped_struct_matrix_set_vec_function(
@@ -929,7 +926,6 @@ impl<'a, W: Write> super::Writer<'a, W> {
                                     self.write_wrapped_struct_matrix_set_scalar_function(
                                         module, access,
                                     )?;
-                                    self.wrapped.struct_matrix_access.insert(access);
                                 }
                             }
                             _ => {}
@@ -1080,9 +1076,8 @@ impl<'a, W: Write> super::Writer<'a, W> {
                 }) = super::writer::get_inner_matrix_data(module, global.ty)
                 {
                     let entry = WrappedMatCx2 { columns };
-                    if !self.wrapped.mat_cx2s.contains(&entry) {
+                    if self.wrapped.mat_cx2s.insert(entry) {
                         self.write_mat_cx2_typedef_and_functions(entry)?;
-                        self.wrapped.mat_cx2s.insert(entry);
                     }
                 }
             }
@@ -1099,9 +1094,8 @@ impl<'a, W: Write> super::Writer<'a, W> {
                         }) = super::writer::get_inner_matrix_data(module, member.ty)
                         {
                             let entry = WrappedMatCx2 { columns };
-                            if !self.wrapped.mat_cx2s.contains(&entry) {
+                            if self.wrapped.mat_cx2s.insert(entry) {
                                 self.write_mat_cx2_typedef_and_functions(entry)?;
-                                self.wrapped.mat_cx2s.insert(entry);
                             }
                         }
                     }
