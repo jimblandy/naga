@@ -39,10 +39,10 @@ struct VertexOutput_main {
 
 void main_1()
 {
-    float2 _expr12 = a_uv_1;
-    v_uv = _expr12;
-    float2 _expr13 = a_pos_1;
-    perVertexStruct.gl_Position = float4(_expr13.x, _expr13.y, 0.0, 1.0);
+    float2 _expr8 = a_uv_1;
+    v_uv = _expr8;
+    float2 _expr9 = a_pos_1;
+    perVertexStruct.gl_Position = float4(_expr9.x, _expr9.y, 0.0, 1.0);
     return;
 }
 
