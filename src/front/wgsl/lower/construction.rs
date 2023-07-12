@@ -4,7 +4,7 @@ use crate::front::wgsl::parse::ast;
 use crate::{Handle, Span};
 
 use crate::front::wgsl::error::Error;
-use crate::front::wgsl::lower::{ExpressionContext, Lowerer, OutputContext};
+use crate::front::wgsl::lower::{ExpressionContext, GlobalContext, Lowerer};
 use crate::proc::TypeResolution;
 
 enum ConcreteConstructorHandle {
@@ -145,7 +145,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         components: &[Handle<ast::Expression<'source>>],
         mut ctx: ExpressionContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
-        let constructor_h = self.constructor(constructor, ctx.as_output())?;
+        let constructor_h = self.constructor(constructor, ctx.as_global())?;
 
         let components_h = match *components {
             [] => ComponentsHandle::None,
@@ -554,7 +554,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         span: Span,
         constructor: &ast::ConstructorType<'source>,
         components: &[Handle<ast::Expression<'source>>],
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<crate::ConstantInner, Error<'source>> {
         // TODO: Support zero values, splatting and inference.
 
@@ -597,7 +597,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn constructor<'out>(
         &mut self,
         constructor: &ast::ConstructorType<'source>,
-        mut ctx: OutputContext<'source, '_, 'out>,
+        mut ctx: GlobalContext<'source, '_, 'out>,
     ) -> Result<ConcreteConstructorHandle, Error<'source>> {
         let c = match *constructor {
             ast::ConstructorType::Scalar { width, kind } => {

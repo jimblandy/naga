@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 mod construction;
 
 /// State for constructing a `crate::Module`.
-pub struct OutputContext<'source, 'temp, 'out> {
+pub struct GlobalContext<'source, 'temp, 'out> {
     /// The `TranslationUnit`'s expressions arena.
     ast_expressions: &'temp Arena<ast::Expression<'source>>,
 
@@ -28,9 +28,9 @@ pub struct OutputContext<'source, 'temp, 'out> {
     module: &'out mut crate::Module,
 }
 
-impl<'source> OutputContext<'source, '_, '_> {
-    fn reborrow(&mut self) -> OutputContext<'source, '_, '_> {
-        OutputContext {
+impl<'source> GlobalContext<'source, '_, '_> {
+    fn reborrow(&mut self) -> GlobalContext<'source, '_, '_> {
+        GlobalContext {
             ast_expressions: self.ast_expressions,
             globals: self.globals,
             types: self.types,
@@ -123,8 +123,8 @@ impl<'a, 'temp> StatementContext<'a, 'temp, '_> {
         }
     }
 
-    fn as_output(&mut self) -> OutputContext<'a, '_, '_> {
-        OutputContext {
+    fn as_global(&mut self) -> GlobalContext<'a, '_, '_> {
+        GlobalContext {
             ast_expressions: self.ast_expressions,
             globals: self.globals,
             types: self.types,
@@ -186,8 +186,8 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         }
     }
 
-    fn as_output(&mut self) -> OutputContext<'a, '_, '_> {
-        OutputContext {
+    fn as_global(&mut self) -> GlobalContext<'a, '_, '_> {
+        GlobalContext {
             ast_expressions: self.ast_expressions,
             globals: self.globals,
             types: self.types,
@@ -364,7 +364,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     }
 
     fn ensure_type_exists(&mut self, inner: crate::TypeInner) -> Handle<crate::Type> {
-        self.as_output().ensure_type_exists(inner)
+        self.as_global().ensure_type_exists(inner)
     }
 }
 
@@ -555,7 +555,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     ) -> Result<crate::Module, Error<'source>> {
         let mut module = crate::Module::default();
 
-        let mut ctx = OutputContext {
+        let mut ctx = GlobalContext {
             ast_expressions: &tu.expressions,
             globals: &mut FastHashMap::default(),
             types: &tu.types,
@@ -668,7 +668,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         &mut self,
         f: &ast::Function<'source>,
         span: Span,
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<LoweredGlobalDecl, Error<'source>> {
         let mut local_table = FastHashMap::default();
         let mut local_variables = Arena::new();
@@ -785,7 +785,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     let value = self.expression(l.init, ctx.as_expression(block, &mut emitter))?;
 
                     let explicit_ty =
-                        l.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
+                        l.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_global()))
                             .transpose()?;
 
                     if let Some(ty) = explicit_ty {
@@ -827,7 +827,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     };
 
                     let explicit_ty =
-                        v.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_output()))
+                        v.ty.map(|ty| self.resolve_ast_type(ty, ctx.as_global()))
                             .transpose()?;
 
                     let ty = match (explicit_ty, initializer) {
@@ -1387,7 +1387,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             }
             ast::Expression::Bitcast { expr, to, ty_span } => {
                 let expr = self.expression(expr, ctx.reborrow())?;
-                let to_resolved = self.resolve_ast_type(to, ctx.as_output())?;
+                let to_resolved = self.resolve_ast_type(to, ctx.as_global())?;
 
                 let kind = match ctx.module.types[to_resolved].inner {
                     crate::TypeInner::Scalar { kind, .. } => kind,
@@ -2034,7 +2034,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
         let offset = args
             .next()
-            .map(|arg| self.constant(arg, ctx.as_output()))
+            .map(|arg| self.constant(arg, ctx.as_global()))
             .ok()
             .transpose()?;
 
@@ -2059,7 +2059,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     ) -> Result<Option<crate::SwizzleComponent>, Error<'source>> {
         let span = ctx.ast_expressions.get_span(expr);
 
-        let constant = match self.constant_inner(expr, ctx.as_output()).ok() {
+        let constant = match self.constant_inner(expr, ctx.as_global()).ok() {
             Some(ConstantOrInner::Constant(c)) => ctx.module.constants[c].inner.clone(),
             Some(ConstantOrInner::Inner(inner)) => inner,
             None => return Ok(None),
@@ -2090,7 +2090,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         &mut self,
         s: &ast::Struct<'source>,
         span: Span,
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
         let mut offset = 0;
         let mut struct_alignment = Alignment::ONE;
@@ -2163,7 +2163,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn resolve_ast_type(
         &mut self,
         handle: Handle<ast::Type<'source>>,
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Type>, Error<'source>> {
         let inner = match ctx.types[handle] {
             ast::Type::Scalar { kind, width } => crate::TypeInner::Scalar { kind, width },
@@ -2267,7 +2267,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn constant(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<Handle<crate::Constant>, Error<'source>> {
         let inner = match self.constant_inner(expr, ctx.reborrow())? {
             ConstantOrInner::Constant(c) => return Ok(c),
@@ -2288,7 +2288,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     fn constant_inner(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
-        mut ctx: OutputContext<'source, '_, '_>,
+        mut ctx: GlobalContext<'source, '_, '_>,
     ) -> Result<ConstantOrInner, Error<'source>> {
         let span = ctx.ast_expressions.get_span(expr);
         let inner = match ctx.ast_expressions[expr] {
@@ -2354,7 +2354,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         &mut self,
         binding: &Option<crate::Binding>,
         ty: Handle<crate::Type>,
-        ctx: OutputContext<'source, '_, '_>,
+        ctx: GlobalContext<'source, '_, '_>,
     ) -> Option<crate::Binding> {
         let mut binding = binding.clone();
         if let Some(ref mut binding) = binding {
