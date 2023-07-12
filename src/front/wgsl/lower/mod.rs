@@ -169,8 +169,8 @@ pub struct ExpressionContext<'source, 'temp, 'out> {
     emitter: &'temp mut Emitter,
 }
 
-impl<'a> ExpressionContext<'a, '_, '_> {
-    fn reborrow(&mut self) -> ExpressionContext<'a, '_, '_> {
+impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
+    fn reborrow(&mut self) -> ExpressionContext<'source, '_, '_> {
         ExpressionContext {
             local_table: self.local_table,
             globals: self.globals,
@@ -186,7 +186,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         }
     }
 
-    fn as_global(&mut self) -> GlobalContext<'a, '_, '_> {
+    fn as_global(&mut self) -> GlobalContext<'source, '_, '_> {
         GlobalContext {
             ast_expressions: self.ast_expressions,
             globals: self.globals,
@@ -210,7 +210,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     fn register_type(
         &mut self,
         handle: Handle<crate::Expression>,
-    ) -> Result<Handle<crate::Type>, Error<'a>> {
+    ) -> Result<Handle<crate::Type>, Error<'source>> {
         self.grow_types(handle)?;
         Ok(self.typifier.register_type(handle, &mut self.module.types))
     }
@@ -235,7 +235,10 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     /// [`self.typifier`]: ExpressionContext::typifier
     /// [`self.resolved_inner(handle)`]: ExpressionContext::resolved_inner
     /// [`Typifier`]: Typifier
-    fn grow_types(&mut self, handle: Handle<crate::Expression>) -> Result<&mut Self, Error<'a>> {
+    fn grow_types(
+        &mut self,
+        handle: Handle<crate::Expression>,
+    ) -> Result<&mut Self, Error<'source>> {
         let resolve_ctx = ResolveContext::with_locals(self.module, self.local_vars, self.arguments);
         self.typifier
             .grow(handle, self.naga_expressions, &resolve_ctx)
@@ -251,7 +254,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         &mut self,
         image: Handle<crate::Expression>,
         span: Span,
-    ) -> Result<(crate::ImageClass, bool), Error<'a>> {
+    ) -> Result<(crate::ImageClass, bool), Error<'source>> {
         self.grow_types(image)?;
         match *self.resolved_inner(image) {
             crate::TypeInner::Image { class, arrayed, .. } => Ok((class, arrayed)),
@@ -261,10 +264,10 @@ impl<'a> ExpressionContext<'a, '_, '_> {
 
     fn prepare_args<'b>(
         &mut self,
-        args: &'b [Handle<ast::Expression<'a>>],
+        args: &'b [Handle<ast::Expression<'source>>],
         min_args: u32,
         span: Span,
-    ) -> ArgumentContext<'b, 'a> {
+    ) -> ArgumentContext<'b, 'source> {
         ArgumentContext {
             args: args.iter(),
             min_args,
@@ -280,7 +283,7 @@ impl<'a> ExpressionContext<'a, '_, '_> {
         op: crate::BinaryOperator,
         left: &mut Handle<crate::Expression>,
         right: &mut Handle<crate::Expression>,
-    ) -> Result<(), Error<'a>> {
+    ) -> Result<(), Error<'source>> {
         if op != crate::BinaryOperator::Multiply {
             self.grow_types(*left)?.grow_types(*right)?;
 
