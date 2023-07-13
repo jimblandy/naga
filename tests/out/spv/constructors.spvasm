@@ -1,0 +1,81 @@
+; SPIR-V
+; Version: 1.1
+; Generator: rspirv
+; Bound: 72
+OpCapability Shader
+%1 = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %24 "main"
+OpExecutionMode %24 LocalSize 1 1 1
+OpMemberDecorate %7 0 Offset 0
+OpMemberDecorate %7 1 Offset 16
+OpDecorate %14 ArrayStride 32
+OpDecorate %16 ArrayStride 4
+%2 = OpTypeVoid
+%4 = OpTypeInt 32 1
+%3 = OpConstant  %4  3
+%6 = OpTypeFloat 32
+%5 = OpTypeVector %6 4
+%7 = OpTypeStruct %5 %4
+%9 = OpTypeVector %6 2
+%8 = OpTypeMatrix %9 2
+%10 = OpTypeMatrix %5 4
+%11 = OpTypeBool
+%12 = OpTypeInt 32 0
+%13 = OpTypeVector %12 2
+%15 = OpConstant  %12  3
+%14 = OpTypeArray %7 %15
+%17 = OpConstant  %12  4
+%16 = OpTypeArray %4 %17
+%19 = OpTypeVector %6 3
+%18 = OpTypeMatrix %19 2
+%21 = OpTypePointer Function %7
+%22 = OpConstantNull  %7
+%25 = OpTypeFunction %2
+%26 = OpConstant  %6  1.0
+%27 = OpConstant  %4  1
+%28 = OpConstant  %6  0.0
+%29 = OpConstantNull  %11
+%30 = OpConstantNull  %4
+%31 = OpConstantNull  %12
+%32 = OpConstantNull  %6
+%33 = OpConstantNull  %13
+%34 = OpConstantNull  %8
+%35 = OpConstantNull  %14
+%36 = OpConstantNull  %7
+%37 = OpConstant  %12  0
+%38 = OpConstant  %4  0
+%39 = OpConstant  %4  2
+%40 = OpConstantNull  %11
+%41 = OpConstantNull  %4
+%42 = OpConstantNull  %12
+%43 = OpConstantNull  %6
+%44 = OpConstantNull  %13
+%45 = OpConstantNull  %18
+%46 = OpConstantNull  %13
+%47 = OpConstantNull  %18
+%24 = OpFunction  %2  None %25
+%23 = OpLabel
+%20 = OpVariable  %21  Function %22
+OpBranch %48
+%48 = OpLabel
+%49 = OpCompositeConstruct  %5  %26 %26 %26 %26
+%50 = OpCompositeConstruct  %7  %49 %27
+OpStore %20 %50
+%51 = OpCompositeConstruct  %9  %26 %28
+%52 = OpCompositeConstruct  %9  %28 %26
+%53 = OpCompositeConstruct  %8  %51 %52
+%54 = OpCompositeConstruct  %5  %26 %28 %28 %28
+%55 = OpCompositeConstruct  %5  %28 %26 %28 %28
+%56 = OpCompositeConstruct  %5  %28 %28 %26 %28
+%57 = OpCompositeConstruct  %5  %28 %28 %28 %26
+%58 = OpCompositeConstruct  %10  %54 %55 %56 %57
+%59 = OpCompositeConstruct  %13  %37 %37
+%60 = OpCompositeConstruct  %9  %28 %28
+%61 = OpCompositeConstruct  %9  %28 %28
+%62 = OpCompositeConstruct  %8  %60 %61
+%63 = OpCompositeConstruct  %16  %38 %27 %39 %3
+%69 = OpCopyObject  %18  %45
+%71 = OpCopyObject  %18  %47
+OpReturn
+OpFunctionEnd
