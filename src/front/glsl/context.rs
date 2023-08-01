@@ -118,8 +118,10 @@ impl<'a> Context<'a> {
     where
         F: FnOnce(&mut Self) -> Result<R>,
     {
+        self.emit_restart();
         let old_body = std::mem::replace(&mut self.body, Block::new());
         let res = cb(self);
+        self.emit_restart();
         let new_body = std::mem::replace(&mut self.body, old_body);
         res.map(|r| (new_body, r))
     }
@@ -128,8 +130,10 @@ impl<'a> Context<'a> {
     where
         F: FnOnce(&mut Self) -> Result<()>,
     {
+        self.emit_restart();
         let old_body = std::mem::replace(&mut self.body, body);
         let res = cb(self);
+        self.emit_restart();
         let body = std::mem::replace(&mut self.body, old_body);
         res.map(|_| body)
     }
@@ -1049,29 +1053,16 @@ impl<'a> Context<'a> {
                     .lower_expect_inner(stmt, frontend, condition, ExprPos::Rhs)?
                     .0;
 
-                // Emit all expressions since we will be adding statements to
-                // other bodies next
-                self.emit_restart();
-
                 let (mut accept_body, (mut accept, accept_meta)) =
                     self.new_body_with_ret(|ctx| {
                         // Lower the `true` branch
-                        let res = ctx.lower_expect_inner(stmt, frontend, accept, pos)?;
-
-                        // Flush the body of the `true` branch, to start emitting on the
-                        // `false` branch
-                        ctx.emit_restart();
-                        Ok(res)
+                        ctx.lower_expect_inner(stmt, frontend, accept, pos)
                     })?;
 
                 let (mut reject_body, (mut reject, reject_meta)) =
                     self.new_body_with_ret(|ctx| {
                         // Lower the `false` branch
-                        let res = ctx.lower_expect_inner(stmt, frontend, reject, pos)?;
-
-                        // Flush the body of the `false` branch
-                        ctx.emit_restart();
-                        Ok(res)
+                        ctx.lower_expect_inner(stmt, frontend, reject, pos)
                     })?;
 
                 // We need to do some custom implicit conversions since the two target expressions
@@ -1095,9 +1086,6 @@ impl<'a> Context<'a> {
                                     reject_kind,
                                     reject_width,
                                 )?;
-                                // The expression belongs to the `true` branch so we need to flush to
-                                // the respective body
-                                ctx.emit_restart();
                                 Ok(())
                             })?;
                         }
@@ -1110,9 +1098,6 @@ impl<'a> Context<'a> {
                                     accept_kind,
                                     accept_width,
                                 )?;
-                                // The expression belongs to the `false` branch so we need to flush to
-                                // the respective body
-                                ctx.emit_restart();
                                 Ok(())
                             })?;
                         }

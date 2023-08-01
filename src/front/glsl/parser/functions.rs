@@ -131,8 +131,6 @@ impl<'source> ParsingContext<'source> {
                 };
                 self.expect(frontend, TokenValue::RightParen)?;
 
-                ctx.emit_restart();
-
                 let accept = ctx.new_body(|ctx| {
                     if let Some(more_meta) = self.parse_statement(frontend, ctx, &mut None)? {
                         meta.subsume(more_meta);
