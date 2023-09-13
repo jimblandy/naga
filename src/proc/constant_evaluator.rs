@@ -1,7 +1,7 @@
 use crate::{
     arena::{Arena, Handle, UniqueArena},
-    ArraySize, BinaryOperator, Constant, Expression, FastHashMap, Literal, ScalarKind, Span, Type,
-    TypeInner, UnaryOperator,
+    ArraySize, BinaryOperator, Constant, Expression, Literal, ScalarKind, Span, Type, TypeInner,
+    UnaryOperator,
 };
 
 #[derive(Debug)]
@@ -14,13 +14,6 @@ pub struct ConstantEvaluator<
     pub expressions: &'a mut Arena<Expression>,
     pub const_expressions: Option<&'a Arena<Expression>>,
     pub append: Option<F>,
-}
-
-#[derive(Debug)]
-pub struct EvalData {
-    pub types: UniqueArena<Type>,
-    pub evald_expressions: Arena<Expression>,
-    pub mapping: FastHashMap<Handle<Expression>, Handle<Expression>>,
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
