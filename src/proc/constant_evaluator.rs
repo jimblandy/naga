@@ -11,8 +11,23 @@ pub struct ConstantEvaluator<
 > {
     pub types: &'a mut UniqueArena<Type>,
     pub constants: &'a Arena<Constant>,
+
+    /// The arena holding the expressions we'll evaluate.
+    ///
+    /// The reduced forms of these expressions will be added here as well.
     pub expressions: &'a mut Arena<Expression>,
+
+    /// If `expressions` is some function's local expression arena, then this is
+    /// the module's constant expression arena.
     pub const_expressions: Option<&'a Arena<Expression>>,
+
+    /// Append an expression, interrupting an emitter if necessary.
+    ///
+    /// The arena passed as the first argument is always `self.expressions`.
+    /// When that refers to the module's constant expression arena, this should
+    /// be `None`. But when it refers to some function's expression arena, this
+    /// should always be a closure that flushes the function's emitter, appends
+    /// the new expression with its span, and then restarts the emitter.
     pub append: Option<F>,
 }
 
@@ -102,6 +117,15 @@ impl Arena<Expression> {
 impl<'a, F: FnMut(&mut Arena<Expression>, Expression, Span) -> Handle<Expression>>
     ConstantEvaluator<'a, F>
 {
+    /// Ensure that `expr` is present in our expression arena, and contains no
+    /// `Constant` expressions.
+    ///
+    /// The expression must be reduced: it must consist solely of `Literal`,
+    /// `ZeroValue`, `Compose`, `Splat`, and `Constant` expressions. If it is
+    /// not, return an error.
+    ///
+    /// If `expr` contains any `Constant` expressions, copy the `Constant`'s
+    /// value into our arena.
     fn check_and_get(
         &mut self,
         expr: Handle<Expression>,
@@ -122,6 +146,13 @@ impl<'a, F: FnMut(&mut Arena<Expression>, Expression, Span) -> Handle<Expression
         }
     }
 
+    /// Try to reduce `expr`, returning a handle to the result.
+    ///
+    /// The result and `expr` must both be in `self.expressions`.
+    ///
+    /// If `expr` cannot be evaluated as a constant expression, return an error.
+    /// In this case, this function may have added new expressions and types to
+    /// the arenas `self` refers to, but they are not referenced.
     pub fn try_eval_and_append(
         &mut self,
         expr: &Expression,
@@ -774,6 +805,8 @@ impl<'a, F: FnMut(&mut Arena<Expression>, Expression, Span) -> Handle<Expression
         Ok(self.register_constant(expr, span))
     }
 
+    /// Recursively copy the evaluated expression `handle` from `expressions`
+    /// into the arena `self` is building.
     fn copy_from(
         &mut self,
         handle: Handle<Expression>,
@@ -799,6 +832,8 @@ impl<'a, F: FnMut(&mut Arena<Expression>, Expression, Span) -> Handle<Expression
         }
     }
 
+    /// Add the evaluated expression `expr`, with `span`, to the arena `self` is
+    /// building.
     fn register_constant(&mut self, expr: Expression, span: Span) -> Handle<Expression> {
         if let Some(ref mut append) = self.append {
             append(self.expressions, expr, span)
