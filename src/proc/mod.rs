@@ -84,6 +84,7 @@ impl PartialEq for crate::Literal {
             (Self::F32(a), Self::F32(b)) => a.to_bits() == b.to_bits(),
             (Self::U32(a), Self::U32(b)) => a == b,
             (Self::I32(a), Self::I32(b)) => a == b,
+            (Self::I64(a), Self::I64(b)) => a == b,
             (Self::Bool(a), Self::Bool(b)) => a == b,
             _ => false,
         }
@@ -109,8 +110,12 @@ impl std::hash::Hash for crate::Literal {
                 hasher.write_u8(3);
                 v.hash(hasher);
             }
-            Self::Bool(v) => {
+            Self::I64(v) => {
                 hasher.write_u8(4);
+                v.hash(hasher);
+            }
+            Self::Bool(v) => {
+                hasher.write_u8(5);
                 v.hash(hasher);
             }
         }
@@ -124,6 +129,7 @@ impl crate::Literal {
             (value, crate::ScalarKind::Float, 4) => Some(Self::F32(value as _)),
             (value, crate::ScalarKind::Uint, 4) => Some(Self::U32(value as _)),
             (value, crate::ScalarKind::Sint, 4) => Some(Self::I32(value as _)),
+            (value, crate::ScalarKind::Sint, 8) => Some(Self::I64(value as _)),
             (1, crate::ScalarKind::Bool, 4) => Some(Self::Bool(true)),
             (0, crate::ScalarKind::Bool, 4) => Some(Self::Bool(false)),
             _ => None,
@@ -140,7 +146,7 @@ impl crate::Literal {
 
     pub const fn width(&self) -> crate::Bytes {
         match *self {
-            Self::F64(_) => 8,
+            Self::F64(_) | Self::I64(_) => 8,
             Self::F32(_) | Self::U32(_) | Self::I32(_) => 4,
             Self::Bool(_) => 1,
         }
@@ -149,7 +155,7 @@ impl crate::Literal {
         match *self {
             Self::F64(_) | Self::F32(_) => crate::ScalarKind::Float,
             Self::U32(_) => crate::ScalarKind::Uint,
-            Self::I32(_) => crate::ScalarKind::Sint,
+            Self::I32(_) | Self::I64(_) => crate::ScalarKind::Sint,
             Self::Bool(_) => crate::ScalarKind::Bool,
         }
     }

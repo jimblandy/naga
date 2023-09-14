@@ -244,7 +244,12 @@ impl super::Validator {
                     width == 4
                 }
             }
-            crate::ScalarKind::Sint | crate::ScalarKind::Uint => width == 4,
+            crate::ScalarKind::Sint | crate::ScalarKind::Uint => {
+                if width == 8 {
+                    return Err(WidthError::Unsupported64Bit);
+                }
+                width == 4
+            }
         };
         if good {
             Ok(())

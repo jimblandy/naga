@@ -1599,3 +1599,44 @@ pub fn check_literal_value(literal: crate::Literal) -> Result<(), LiteralError> 
 
     Ok(())
 }
+
+/// Using I64 in a function's expression arena is forbidden.
+#[cfg(feature = "validate")]
+#[test]
+fn i64_runtime_literals() {
+    let result = validate_with_expression(
+        crate::Expression::Literal(crate::Literal::I64(1729)),
+        // There is no capability that enables this.
+        super::Capabilities::all(),
+    );
+    let error = result.unwrap_err().into_inner();
+    assert!(matches!(
+        error,
+        crate::valid::ValidationError::Function {
+            source: super::FunctionError::Expression {
+                source: super::ExpressionError::Width(super::r#type::WidthError::Unsupported64Bit),
+                ..
+            },
+            ..
+        }
+    ));
+}
+
+/// Using I64 in a module's constant expression arena is forbidden.
+#[cfg(feature = "validate")]
+#[test]
+fn i64_const_literals() {
+    let result = validate_with_const_expression(
+        crate::Expression::Literal(crate::Literal::I64(1729)),
+        // There is no capability that enables this.
+        super::Capabilities::all(),
+    );
+    let error = result.unwrap_err().into_inner();
+    assert!(matches!(
+        error,
+        crate::valid::ValidationError::ConstExpression {
+            source: super::ConstExpressionError::Width(super::r#type::WidthError::Unsupported64Bit,),
+            ..
+        }
+    ));
+}
