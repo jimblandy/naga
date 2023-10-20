@@ -138,7 +138,8 @@ pub struct StatementContext<'source, 'temp, 'out> {
     ///
     /// [`LocalVariable`]: crate::Expression::LocalVariable
     /// [`FunctionArgument`]: crate::Expression::FunctionArgument
-    local_table: &'temp mut FastHashMap<Handle<ast::Local>, TypedExpression>,
+    local_table:
+        &'temp mut FastHashMap<Handle<ast::Local>, Typed<Handle<crate::Expression>>>,
 
     const_typifier: &'temp mut Typifier,
     typifier: &'temp mut Typifier,
@@ -219,7 +220,7 @@ pub struct RuntimeExpressionContext<'temp, 'out> {
     ///
     /// This is always [`StatementContext::local_table`] for the
     /// enclosing statement; see that documentation for details.
-    local_table: &'temp FastHashMap<Handle<ast::Local>, TypedExpression>,
+    local_table: &'temp FastHashMap<Handle<ast::Local>, Typed<Handle<crate::Expression>>>,
 
     naga_expressions: &'out mut Arena<crate::Expression>,
     local_vars: &'out Arena<crate::LocalVariable>,
@@ -358,7 +359,7 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
     ) -> Result<Handle<crate::Expression>, Error<'source>> {
         let mut eval = self.as_const_evaluator();
         match eval.try_eval_and_append(&expr, span) {
-            Ok(expr) => Ok(expr),
+            Ok(evaluated_expr) => Ok(evaluated_expr),
 
             // `expr` is not a constant expression. This is fine as
             // long as we're not building `Module::const_expressions`.
@@ -368,6 +369,13 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
                 }
                 ExpressionContextType::Constant => Err(Error::ConstantEvaluatorError(err, span)),
             },
+        }
+    }
+
+    fn is_const(&self, expr: Handle<crate::Expression>) -> bool {
+        match self.expr_type {
+            ExpressionContextType::Runtime(rctx) => rctx.expression_constness.is_const(expr),
+            ExpressionContextType::Constant => true,
         }
     }
 
@@ -462,17 +470,23 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
     /// [`LocalVariable`]: crate::LocalVariable
     fn register_type(
         &mut self,
-        handle: Handle<crate::Expression>,
-    ) -> Result<Handle<crate::Type>, Error<'source>> {
-        self.grow_types(handle)?;
-        // This is equivalent to calling ExpressionContext::typifier(),
-        // except that this lets the borrow checker see that it's okay
-        // to also borrow self.module.types mutably below.
-        let typifier = match self.expr_type {
-            ExpressionContextType::Runtime(ref ctx) => ctx.typifier,
-            ExpressionContextType::Constant => &*self.const_typifier,
-        };
-        Ok(typifier.register_type(handle, &mut self.module.types))
+        expr: Typed<Handle<crate::Expression>>,
+    ) -> Result<Typed<Handle<crate::Type>>, Error<'source>> {
+        // Ensure that we have a `TypeResolution` for `expr`.
+        expr.try_map(|expr_handle| {
+            self.grow_types(expr_handle)?;
+
+            // This is equivalent to calling ExpressionContext::typifier(),
+            // except that this lets the borrow checker see that it's okay
+            // to also borrow self.module.types mutably below.
+            let typifier = match self.expr_type {
+                ExpressionContextType::Runtime(ref ctx) => ctx.typifier,
+                ExpressionContextType::Constant => &*self.const_typifier,
+            };
+
+            // Promote the `TypeResolution` to a full `Type` in the arena.
+            Ok(typifier.register_type(expr_handle, &mut self.module.types))
+        })
     }
 
     /// Resolve the types of all expressions up through `handle`.
@@ -623,17 +637,35 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
     /// `T`. Otherwise, return `expr` unchanged.
     fn apply_load_rule(
         &mut self,
-        expr: TypedExpression,
-    ) -> Result<Handle<crate::Expression>, Error<'source>> {
-        if expr.is_reference {
-            let load = crate::Expression::Load {
-                pointer: expr.handle,
-            };
-            let span = self.get_expression_span(expr.handle);
-            self.append_expression(load, span)
+        expr: Typed<Handle<crate::Expression>>,
+    ) -> Result<Typed<Handle<crate::Expression>>, Error<'source>> {
+        if let Typed::Reference(pointer) = expr {
+            let load = crate::Expression::Load { pointer };
+            let span = self.get_expression_span(pointer);
+            let loaded = self.append_expression(load, span)?;
+            // Since the value was stored, it can't be abstract any more.
+            Ok(Typed::Plain(loaded))
         } else {
-            Ok(expr.handle)
+            Ok(expr)
         }
+    }
+
+
+    /// Convert an abstract-typed `expr` to a concrete type.
+    ///
+    /// The desired type for the scalars in `expr` is given by `kind`
+    /// and `width`. If `expr` is a vector, matrix, or array, the
+    /// conversion applies to its leaves.
+    fn concretize(
+        &mut self,
+        expr: Handle<crate::Expression>,
+        kind: crate::ScalarKind,
+        width: crate::Bytes,
+    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+        let span = self.get_expression_span(expr);
+        let concrete = self.as_const_evaluator().cast(expr, kind, width, span, true)
+            .map_err(|err| Error::ConstantEvaluatorError(err, span))?;
+        Ok(concrete)
     }
 
     fn format_typeinner(&self, inner: &crate::TypeInner) -> String {
@@ -696,29 +728,79 @@ impl<'source> ArgumentContext<'_, 'source> {
     }
 }
 
-/// A Naga [`Expression`] handle, with WGSL type information.
+/// WGSL type annotations on expressions, types, values, etc.
 ///
-/// Naga and WGSL types are very close, but Naga lacks WGSL's 'reference' types,
-/// which we need to know to apply the Load Rule. This struct carries a Naga
-/// `Handle<Expression>` along with enough information to determine its WGSL type.
+/// Naga and WGSL types are very close, but Naga lacks WGSL's `ref`,
+/// `AbstractInt`, and `AbstractFloat` types, which we need to know to apply the
+/// Load Rule and automatic conversions. This enum carries some WGSL or Naga
+/// datum along with enough information to determine its corresponding WGSL
+/// type.
 ///
-/// [`Expression`]: crate::Expression
+/// The `T` type parameter can be any expression-like thing:
+///
+/// - `TypedExpression<Handle<crate::Type>>` can represent a full WGSL type: a
+///   reference type is a `TypedExpression::Reference` to a Naga `Pointer` type,
+///   for example, and an `AbstractFloat` or `AbstractInt` is a
+///   `TypedExpression::Abstract` around a Naga `Scalar` type.
+///
+/// - `TypedExpression<crate::Expression>` or
+///   `TypedExpression<Handle<crate::Expression>>` can represent references and
+///   abstract-typed values similarly.
+///
+/// - We temporarily use `TypedExpression<crate::Literal>` in processing
+///   literal expressions, to distinguish abstract literal values from concrete.
+///   
+/// Use the `map` and `try_map` methods to convert from one expression
+/// representation to another.
 #[derive(Debug, Copy, Clone)]
-struct TypedExpression {
-    /// The handle of the Naga expression.
-    handle: Handle<crate::Expression>,
-
-    /// True if this expression's WGSL type is a reference.
+enum Typed<T> {
+    /// An expression whose type is a reference.
     ///
-    /// When this is true, `handle` must be a pointer.
-    is_reference: bool,
+    /// The underlying expression must be a pointer.
+    Reference(T),
+
+    /// An expression whose type is abstract.
+    ///
+    /// The handle should be an evaluated expression, and may contain
+    /// `I64` and `F64` values, even though they are not part of WGSL.
+    Abstract(T),
+
+    /// An expression whose type is concrete and not a reference.
+    Plain(T),
 }
 
-impl TypedExpression {
-    const fn non_reference(handle: Handle<crate::Expression>) -> TypedExpression {
-        TypedExpression {
-            handle,
-            is_reference: false,
+impl<T> Typed<T> {
+    fn map<U>(self, f: impl FnMut(T) -> U) -> Typed<U> {
+        match self {
+            Self::Reference(expr) => Self::Reference(f(expr)),
+            Self::Abstract(expr) => Self::Abstract(f(expr)),
+            Self::Plain(expr) => Self::Plain(f(expr)),
+        }
+    }
+
+    fn try_map<U, E>(self, f: impl FnMut(T) -> Result<U, E>) -> Result<Typed<U>, E> {
+        Ok(match self {
+            Self::Reference(expr) => Self::Reference(f(expr)?),
+            Self::Abstract(expr) => Self::Abstract(f(expr)?),
+            Self::Plain(expr) => Self::Plain(f(expr)?),
+        })
+    }
+}
+
+impl<H> Typed<Handle<H>> {
+    fn handle(self) -> Handle<H> {
+        match self {
+            Typed::Reference(handle) => handle,
+            Typed::Abstract(handle) => handle,
+            Typed::Plain(handle) => handle,
+        }
+    }
+
+    fn handle_mut(&mut self) -> &mut Handle<H> {
+        match self {
+            Typed::Reference(ref mut handle) => handle,
+            Typed::Abstract(ref mut handle) => handle,
+            Typed::Plain(ref mut handle) => handle,
         }
     }
 }
@@ -781,7 +863,7 @@ impl Components {
 enum LoweredGlobalDecl {
     Function(Handle<crate::Function>),
     Var(Handle<crate::GlobalVariable>),
-    Const(Handle<crate::Constant>),
+    Const(Typed<Handle<crate::Constant>>),
     Type(Handle<crate::Type>),
     EntryPoint,
 }
@@ -978,7 +1060,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let ty = self.resolve_ast_type(arg.ty, ctx)?;
                 let expr = expressions
                     .append(crate::Expression::FunctionArgument(i as u32), arg.name.span);
-                local_table.insert(arg.handle, TypedExpression::non_reference(expr));
+                local_table.insert(arg.handle, Typed::Plain(expr));
                 named_expressions.insert(expr, (arg.name.name.to_string(), arg.name.span));
 
                 Ok(crate::FunctionArgument {
@@ -1123,7 +1205,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     block.extend(emitter.finish(ctx.naga_expressions));
                     ctx.local_table
-                        .insert(l.handle, TypedExpression::non_reference(value));
+                        .insert(l.handle, Typed::Plain(value));
                     ctx.named_expressions
                         .insert(value, (l.name.name.to_string(), l.name.span));
 
@@ -1203,13 +1285,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         Span::UNDEFINED,
                     )?;
                     block.extend(emitter.finish(ctx.naga_expressions));
-                    ctx.local_table.insert(
-                        v.handle,
-                        TypedExpression {
-                            handle,
-                            is_reference: true,
-                        },
-                    );
+                    ctx.local_table
+                        .insert(v.handle, Typed::Reference(handle));
 
                     match initializer {
                         Some(initializer) => crate::Statement::Store {
@@ -1361,7 +1438,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     Some(op) => {
                         let mut ctx = ctx.as_expression(block, &mut emitter);
                         let mut left = ctx.apply_load_rule(expr)?;
-                        ctx.binary_op_splat(op, &mut left, &mut value)?;
+                        ctx.binary_op_splat(op, left.handle_mut(), value.handle_mut())?;
                         ctx.append_expression(
                             crate::Expression::Binary {
                                 op,
@@ -1450,64 +1527,64 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         Ok(())
     }
 
+    /// Lower `expr` and apply the WGSL Load Rule.
+    ///
+    /// This never returns `Ok(TypedExpression::Reference(_))`.
     fn expression(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
         ctx: &mut ExpressionContext<'source, '_, '_>,
-    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+    ) -> Result<Typed<Handle<crate::Expression>>, Error<'source>> {
         let expr = self.expression_for_reference(expr, ctx)?;
         ctx.apply_load_rule(expr)
     }
 
+    /// Lower `expr`, but do not apply the Load Rule.
+    ///
+    /// WGSL says that the Load Rule should only be applied when needed to
+    /// satisfy a type rule. Contexts like the target of an assignment or the
+    /// operand of the `&` operator should use this function: these context
+    /// require a reference, so the Load Rule would be inappropriate.
     fn expression_for_reference(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
         ctx: &mut ExpressionContext<'source, '_, '_>,
-    ) -> Result<TypedExpression, Error<'source>> {
+    ) -> Result<Typed<Handle<crate::Expression>>, Error<'source>> {
         let span = ctx.ast_expressions.get_span(expr);
         let expr = &ctx.ast_expressions[expr];
 
-        let (expr, is_reference) = match *expr {
+        let expr = match *expr {
             ast::Expression::Literal(literal) => {
-                let literal = match literal {
-                    ast::Literal::Number(Number::F32(f)) => crate::Literal::F32(f),
-                    ast::Literal::Number(Number::I32(i)) => crate::Literal::I32(i),
-                    ast::Literal::Number(Number::U32(u)) => crate::Literal::U32(u),
-                    ast::Literal::Number(_) => {
-                        unreachable!("got abstract numeric type when not expected");
-                    }
-                    ast::Literal::Bool(b) => crate::Literal::Bool(b),
-                };
-                let handle = ctx.interrupt_emitter(crate::Expression::Literal(literal), span)?;
-                return Ok(TypedExpression::non_reference(handle));
+                return self.literal(literal, span, ctx);
             }
             ast::Expression::Ident(ast::IdentExpr::Local(local)) => {
                 let rctx = ctx.runtime_expression_ctx(span)?;
                 return Ok(rctx.local_table[&local]);
             }
             ast::Expression::Ident(ast::IdentExpr::Unresolved(name)) => {
-                return if let Some(global) = ctx.globals.get(name) {
-                    let (expr, is_reference) = match *global {
-                        LoweredGlobalDecl::Var(handle) => (
-                            crate::Expression::GlobalVariable(handle),
-                            ctx.module.global_variables[handle].space
-                                != crate::AddressSpace::Handle,
-                        ),
-                        LoweredGlobalDecl::Const(handle) => {
-                            (crate::Expression::Constant(handle), false)
-                        }
-                        _ => {
-                            return Err(Error::Unexpected(span, ExpectedToken::Variable));
-                        }
-                    };
+                let global = ctx
+                    .globals
+                    .get(name)
+                    .ok_or(Error::UnknownIdent(span, name))?;
 
-                    let handle = ctx.interrupt_emitter(expr, span)?;
-                    Ok(TypedExpression {
-                        handle,
-                        is_reference,
-                    })
-                } else {
-                    Err(Error::UnknownIdent(span, name))
+                match *global {
+                    LoweredGlobalDecl::Var(handle) => {
+                        let global_expr = crate::Expression::GlobalVariable(handle);
+                        // Uses of global variables in the `Handle` address
+                        // space don't produce references.
+                        if ctx.module.global_variables[handle].space == crate::AddressSpace::Handle
+                        {
+                            Typed::Plain(global_expr)
+                        } else {
+                            Typed::Reference(global_expr)
+                        }
+                    }
+                    LoweredGlobalDecl::Const(constant) => {
+                        constant.map(|handle| crate::Expression::Constant(handle))
+                    }
+                    _ => {
+                        return Err(Error::Unexpected(span, ExpectedToken::Variable));
+                    }
                 }
             }
             ast::Expression::Construct {
@@ -1515,46 +1592,50 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ty_span,
                 ref components,
             } => {
-                let handle = self.construct(span, ty, ty_span, components, ctx)?;
-                return Ok(TypedExpression::non_reference(handle));
+                return self.construct(span, ty, ty_span, components, ctx);
             }
-            ast::Expression::Unary { op, expr } => {
-                let expr = self.expression(expr, ctx)?;
-                (crate::Expression::Unary { op, expr }, false)
-            }
+            ast::Expression::Unary { op, expr } => self
+                .expression(expr, ctx)?
+                .map(|expr| crate::Expression::Unary { op, expr }),
+            ast::Expression::Binary { op, left, right } => self.binary(op, left, right, ctx)?,
             ast::Expression::AddrOf(expr) => {
-                // The `&` operator simply converts a reference to a pointer. And since a
-                // reference is required, the Load Rule is not applied.
-                let expr = self.expression_for_reference(expr, ctx)?;
-                if !expr.is_reference {
-                    return Err(Error::NotReference("the operand of the `&` operator", span));
+                // Lower the operand, but do not apply the Load Rule. WGSL says
+                // that the Load Rule should only be applied when needed to
+                // satisfy a type rule. The `&` operator requires a reference as
+                // its operand, so the Load Rule is never necessary.
+                let reference = self.expression_for_reference(expr, ctx)?;
+                match reference {
+                    Typed::Reference(expr) => {
+                        // No code is generated. The underlying Naga pointer
+                        // used to be a WGSL reference, but now it's a WGSL
+                        // pointer. Abstract types aren't storable, so it's
+                        // definitely concrete.
+                        return Ok(Typed::Plain(expr));
+                    }
+                    Typed::Abstract(_) | Typed::Plain(_) => {
+                        return Err(Error::NotReference("the operand of the `&` operator", span));
+                    }
                 }
-
-                // No code is generated. We just declare the pointer a reference now.
-                return Ok(TypedExpression {
-                    is_reference: false,
-                    ..expr
-                });
             }
             ast::Expression::Deref(expr) => {
-                // The pointer we dereference must be loaded.
+                // The `*` operator does not accept references as operands,
+                // so we must apply the Load Rule as needed.
                 let pointer = self.expression(expr, ctx)?;
 
-                if resolve_inner!(ctx, pointer).pointer_space().is_none() {
-                    return Err(Error::NotPointer(span));
+                match pointer {
+                    Typed::Reference(_) => unreachable!("we just applied the load rule"),
+                    Typed::Abstract(_) => return Err(Error::NotPointer(span)),
+                    Typed::Plain(pointer_handle) => {
+                        if resolve_inner!(ctx, pointer_handle).pointer_space().is_none() {
+                            return Err(Error::NotPointer(span));
+                        }
+                        // No code is actually generated. The underlying Naga
+                        // pointer used to be a WGSL pointer, but now it's a
+                        // WGSL reference. Abstract types aren't storable, so
+                        // it's definitely concrete.
+                        Ok(Typed::Reference(pointer_handle))
+                    }
                 }
-
-                return Ok(TypedExpression {
-                    handle: pointer,
-                    is_reference: true,
-                });
-            }
-            ast::Expression::Binary { op, left, right } => {
-                // Load both operands.
-                let mut left = self.expression(left, ctx)?;
-                let mut right = self.expression(right, ctx)?;
-                ctx.binary_op_splat(op, &mut left, &mut right)?;
-                (crate::Expression::Binary { op, left, right }, false)
             }
             ast::Expression::Call {
                 ref function,
@@ -1563,20 +1644,20 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let handle = self
                     .call(span, function, arguments, ctx)?
                     .ok_or(Error::FunctionReturnsVoid(function.span))?;
-                return Ok(TypedExpression::non_reference(handle));
+                return Ok(Typed::Plain(handle));
             }
             ast::Expression::Index { base, index } => {
                 let expr = self.expression_for_reference(base, ctx)?;
-                let index = self.expression(index, ctx)?;
+                let index = self.concrete_expression(index, ctx)?;
 
-                let wgsl_pointer = resolve_inner!(ctx, expr.handle).pointer_space().is_some()
-                    && !expr.is_reference;
-
-                if wgsl_pointer {
-                    return Err(Error::Pointer(
-                        "the value indexed by a `[]` subscripting expression",
-                        ctx.ast_expressions.get_span(base),
-                    ));
+                // WGSL subscripting can't be applied to pointers.
+                if let Typed::Plain(expr_handle) = expr {
+                    if resolve_inner!(ctx, expr_handle).pointer_space().is_some() {
+                        return Err(Error::Pointer(
+                            "the value indexed by a `[]` subscripting expression",
+                            ctx.ast_expressions.get_span(base),
+                        ));
+                    }
                 }
 
                 if let Some(index) = ctx.const_access(index) {
@@ -1597,92 +1678,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     )
                 }
             }
-            ast::Expression::Member { base, ref field } => {
-                let TypedExpression {
-                    handle,
-                    is_reference,
-                } = self.expression_for_reference(base, ctx)?;
-
-                let temp_inner;
-                let (composite, wgsl_pointer) = match *resolve_inner!(ctx, handle) {
-                    crate::TypeInner::Pointer { base, .. } => {
-                        (&ctx.module.types[base].inner, !is_reference)
-                    }
-                    crate::TypeInner::ValuePointer {
-                        size: None,
-                        kind,
-                        width,
-                        ..
-                    } => {
-                        temp_inner = crate::TypeInner::Scalar { kind, width };
-                        (&temp_inner, !is_reference)
-                    }
-                    crate::TypeInner::ValuePointer {
-                        size: Some(size),
-                        kind,
-                        width,
-                        ..
-                    } => {
-                        temp_inner = crate::TypeInner::Vector { size, kind, width };
-                        (&temp_inner, !is_reference)
-                    }
-                    ref other => (other, false),
-                };
-
-                if wgsl_pointer {
-                    return Err(Error::Pointer(
-                        "the value accessed by a `.member` expression",
-                        ctx.ast_expressions.get_span(base),
-                    ));
-                }
-
-                let access = match *composite {
-                    crate::TypeInner::Struct { ref members, .. } => {
-                        let index = members
-                            .iter()
-                            .position(|m| m.name.as_deref() == Some(field.name))
-                            .ok_or(Error::BadAccessor(field.span))?
-                            as u32;
-
-                        (
-                            crate::Expression::AccessIndex {
-                                base: handle,
-                                index,
-                            },
-                            is_reference,
-                        )
-                    }
-                    crate::TypeInner::Vector { .. } | crate::TypeInner::Matrix { .. } => {
-                        match Components::new(field.name, field.span)? {
-                            Components::Swizzle { size, pattern } => {
-                                let vector = ctx.apply_load_rule(TypedExpression {
-                                    handle,
-                                    is_reference,
-                                })?;
-
-                                (
-                                    crate::Expression::Swizzle {
-                                        size,
-                                        vector,
-                                        pattern,
-                                    },
-                                    false,
-                                )
-                            }
-                            Components::Single(index) => (
-                                crate::Expression::AccessIndex {
-                                    base: handle,
-                                    index,
-                                },
-                                is_reference,
-                            ),
-                        }
-                    }
-                    _ => return Err(Error::BadAccessor(field.span)),
-                };
-
-                access
-            }
+            ast::Expression::Member { base, ref field } => self.member(base, field, ctx)?,
             ast::Expression::Bitcast { expr, to, ty_span } => {
                 let expr = self.expression(expr, ctx)?;
                 let to_resolved = self.resolve_ast_type(to, &mut ctx.as_global())?;
@@ -1712,10 +1708,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         };
 
         let handle = ctx.append_expression(expr, span)?;
-        Ok(TypedExpression {
-            handle,
-            is_reference,
-        })
+        Ok(Typed::Plain(handle))
     }
 
     /// Generate Naga IR for call expressions and statements, and type
@@ -2249,6 +2242,143 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         }
     }
 
+    fn binary(&mut self,
+              op: crate::BinaryOperator,
+              left: Handle<ast::Expression>,
+              right: Handle<ast::Expression>,
+              ctx: &mut ExpressionContext<'source, '_, '_>,
+    ) -> Result<Typed<crate::Expression>, Error<'source>> {
+        // There are no binary operators that operate on references, so
+        // apply the Load Rule to both operands.
+        let mut left = self.expression(left, ctx)?;
+        let mut right = self.expression(right, ctx)?;
+        ctx.binary_op_splat(op, left.handle_mut(), right.handle_mut())?;
+
+        // Concretize abstract operands as necessary.
+        let result = if let crate::BinaryOperator::ShiftLeft | crate::BinaryOperator::ShiftRight = op {
+            todo!()
+        } else {
+            // Aside from the bit shift operators, all binary operators
+            // require both operands to be of the same scalar kind.
+            use Typed as Ty;
+            match (left, right) {
+                // If both operands are concrete, then the result is concrete.
+                (Ty::Plain(left), Ty::Plain(right)) => {
+                    Ty::Plain(crate::Expression::Binary { op, left, right })
+                }
+
+                // If both operands are abstract, then the result is
+                // still abstract.
+                (Ty::Abstract(left), Ty::Abstract(right)) => {
+                    Ty::Abstract(crate::Expression::Binary { op, left, right })
+                }
+
+                // Otherwise, the abstract operand needs to be converted
+                // to the scalar kind of the concrete operand.
+                (Ty::Abstract(mut left), Ty::Plain(right)) => {
+                    if let Some((kind, width)) = resolve_inner!(ctx, right).scalar_kind_and_width() {
+                        left = ctx.concretize(left, kind, width)?;
+                    }
+                    Ty::Plain(crate::Expression::Binary { op, left, right })
+                }
+                (Ty::Plain(left), Ty::Abstract(mut right)) => {
+                    if let Some((kind, width)) = resolve_inner!(ctx, left).scalar_kind_and_width() {
+                        right = ctx.concretize(right, kind, width)?;
+                    }
+                    Ty::Plain(crate::Expression::Binary { op, left, right })
+                }
+
+                // Since `Lowerer::expression`, called above, applies
+                // the load rule, we should never see `Reference`
+                // expressions here.
+                (Ty::Reference(_), _) | (_, Ty::Reference(_)) => {
+                    unreachable!("we just applied the load rule")
+                }
+            }
+        };
+
+        Ok(result)
+    }
+
+    fn member(
+        &mut self,
+        base_ast: Handle<ast::Expression>,
+        field: &ast::Ident<'source>,
+        ctx: &mut ExpressionContext<'source, '_, '_>
+    ) -> Result<Typed<crate::Expression>, Error<'source>> {
+        let mut base = self.expression_for_reference(base_ast, ctx)?;
+
+        // Determine what type of composite we're actually accessing a
+        // member/members of.
+        let temp_composite_inner;
+        let composite_inner;
+        match base {
+            Typed::Reference(base_handle) => {
+                // The actual Naga expression had better be a pointer. Follow it
+                // to find the composite type.
+                match *resolve_inner!(ctx, base_handle) {
+                    crate::TypeInner::Pointer { base: composite_ty, .. } => {
+                        composite_inner = &ctx.module.types[composite_ty].inner;
+                    },
+                    crate::TypeInner::ValuePointer { size, kind, width, .. } => {
+                        temp_composite_inner = match size {
+                            Some(size) => crate::TypeInner::Vector { size, kind, width },
+                            None => crate::TypeInner::Scalar { kind, width },
+                        };
+                        composite_inner = &temp_composite_inner;
+                    }
+                    ref other => {
+                        // If the WGSL expression is a reference, the Naga type
+                        // really ought to be a pointer.
+                        return Err(Error::Internal("Typed::Reference expr was not a Naga pointer"));
+                    }
+                }                
+            }
+            Typed::Abstract(base_handle) | Typed::Plain(base_handle) => {
+                composite_inner = resolve_inner!(ctx, base_handle);
+
+                // Here, a Naga pointer type represents a WGSL pointer type.
+                // WGSL doesn't allow member access on pointers.
+                if let crate::TypeInner::Pointer { .. } | crate::TypeInner::ValuePointer { .. } = *composite_inner {
+                    return Err(Error::Pointer(
+                        "the value accessed by a `.member` expression",
+                        ctx.ast_expressions.get_span(base_ast),
+                    ));
+                }
+            }
+        }
+
+        let access = match *composite_inner {
+            crate::TypeInner::Struct { ref members, .. } => {
+                let index = members
+                    .iter()
+                    .position(|m| m.name.as_deref() == Some(field.name))
+                    .ok_or(Error::BadAccessor(field.span))?
+                    as u32;
+
+                base.map(|base| crate::Expression::AccessIndex { base, index })
+            }
+            crate::TypeInner::Vector { .. } => {
+                match Components::new(field.name, field.span)? {
+                    Components::Swizzle { size, pattern } => {
+                        // WGSL does not support assignment to swizzles, so the
+                        // result of a swizzle is no longer a reference.
+                        base = ctx.apply_load_rule(base)?;
+                        // We know `base` can't be a `Typed::Reference`; this
+                        // `map` preserves the `Abstract`/`Plain` distinction.
+                        base.map(|vector| crate::Expression::Swizzle { size, vector, pattern })
+                    }
+                    Components::Single(index) => {
+                        base.map(|base| crate::Expression::AccessIndex { base, index })
+                    }
+                }
+            }
+            _ => return Err(Error::BadAccessor(field.span)),
+        };
+
+        Ok(access)
+    }
+
     fn atomic_pointer(
         &mut self,
         expr: Handle<ast::Expression<'source>>,
@@ -2503,6 +2633,28 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             span,
         );
         Ok(handle)
+    }
+
+    fn literal(
+        &mut self,
+        literal: ast::Literal,
+        span: Span,
+        mut ctx: ExpressionContext<'source, '_, '_>,
+    ) -> Result<Typed<Handle<crate::Expression>>, Error<'source>> {
+        use crate::Literal as Nl;
+        use ast::Literal as Al;
+        use Typed as Te;
+
+        let literal = match literal {
+            Al::Bool(b) => Te::Plain(Nl::Bool(b)),
+            Al::Number(Number::AbstractInt(i)) => Te::Abstract(Nl::I64(i)),
+            Al::Number(Number::AbstractFloat(f)) => Te::Abstract(Nl::F64(f)),
+            Al::Number(Number::I32(n)) => Te::Plain(Nl::I32(n)),
+            Al::Number(Number::U32(n)) => Te::Plain(Nl::U32(n)),
+            Al::Number(Number::F32(n)) => Te::Plain(Nl::F32(n)),
+        };
+
+        literal.try_map(|literal| ctx.append_expression(crate::Expression::Literal(literal), span))
     }
 
     fn const_u32(

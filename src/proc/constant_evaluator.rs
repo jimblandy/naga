@@ -404,7 +404,7 @@ impl<'a> ConstantEvaluator<'a> {
                 let expr = self.check_and_get(expr)?;
 
                 match convert {
-                    Some(width) => self.cast(expr, kind, width, span),
+                    Some(width) => self.cast(expr, kind, width, span, false),
                     None => Err(ConstantEvaluatorError::NotImplemented(
                         "bitcast built-in function".into(),
                     )),
@@ -921,27 +921,36 @@ impl<'a> ConstantEvaluator<'a> {
         }
     }
 
-    fn cast(
+    /// Convert the scalar components of `expr` to `kind` and `target_width`.
+    ///
+    /// Treat `span` as the 
+    pub fn cast(
         &mut self,
         expr: Handle<Expression>,
         kind: ScalarKind,
         target_width: crate::Bytes,
         span: Span,
+        lossless: bool,
     ) -> Result<Handle<Expression>, ConstantEvaluatorError> {
         let expr = self.eval_zero_value_and_splat(expr, span)?;
 
         let expr = match self.expressions[expr] {
             Expression::Literal(literal) => {
                 let literal = match (kind, target_width) {
-                    (ScalarKind::Sint, 4) => Literal::I32(match literal {
-                        Literal::I32(v) => v,
-                        Literal::U32(v) => v as i32,
-                        Literal::F32(v) => v as i32,
-                        Literal::Bool(v) => v as i32,
-                        Literal::F64(_) | Literal::I64(_) => {
-                            return Err(ConstantEvaluatorError::InvalidCastArg)
-                        }
-                    }),
+                    (ScalarKind::Sint, 4) => {
+                        let i = match literal {
+                            Literal::I32(v) => v,
+                            Literal::U32(v) => v as i32,
+                            Literal::F32(v) => v as i32,
+                            Literal::Bool(v) => v as i32,
+                            Literal::F64(v) => v as i32,
+                            Literal::I64(v) => v as i32,
+                                Literal::F64(_) | Literal::I64(_) => {
+                                    return Err(ConstantEvaluatorError::InvalidCastArg)
+                                }
+                        };
+                        todo!() // implement losslessness
+                    },
                     (ScalarKind::Uint, 4) => Literal::U32(match literal {
                         Literal::I32(v) => v as u32,
                         Literal::U32(v) => v,
@@ -993,7 +1002,7 @@ impl<'a> ConstantEvaluator<'a> {
 
                 let mut components = src_components.clone();
                 for component in &mut components {
-                    *component = self.cast(*component, kind, target_width, span)?;
+                    *component = self.cast(*component, kind, target_width, span, lossless)?;
                 }
 
                 let ty = self.types.insert(

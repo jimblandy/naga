@@ -191,6 +191,15 @@ impl super::TypeInner {
         }
     }
 
+    pub const fn scalar_kind_and_width(&self) -> Option<(super::ScalarKind, super::Bytes)> {
+        // Multiply by 8 to get the bit width
+        match *self {
+            super::TypeInner::Scalar { kind, width } | super::TypeInner::Vector { kind, width, .. } => Some((kind, width)),
+            super::TypeInner::Matrix { width, .. } => Some((super::ScalarKind::Float, width)),
+            _ => None,
+        }
+    }
+
     pub const fn pointer_space(&self) -> Option<crate::AddressSpace> {
         match *self {
             Self::Pointer { space, .. } => Some(space),

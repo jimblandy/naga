@@ -144,7 +144,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         ty_span: Span,
         components: &[Handle<ast::Expression<'source>>],
         ctx: &mut ExpressionContext<'source, '_, '_>,
-    ) -> Result<Handle<crate::Expression>, Error<'source>> {
+    ) -> Result<super::Typed<Handle<crate::Expression>>, Error<'source>> {
         let constructor_h = self.constructor(constructor, ctx)?;
 
         let components_h = match *components {
